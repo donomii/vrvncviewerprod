@@ -38,7 +38,7 @@ You can also use this simple [MJPEG server](http://praeceptamachinae.com/resourc
 
 ### Android app
 
-Download and install vrvncviewer from the play store.  After you have started your VNC server, start the vrvncviewer app.  vrvncviewer will scan the local network for your computer, and display it in VR.
+Download and install vrvncviewer from the play store.  After you have started your VNC server, start the vrvncviewer app.  vrvncviewer will scan the local network for your computer, and display it in VR.  Tap your screen (or click with your controller) to move the VR screen to be in front of you.
 
 Finding your computer should take a few seconds.  If vrvncviwer loses the connection, it will start scanning the network again until it finds a server.
 
@@ -48,3 +48,4 @@ vrvncviewer currently runs at around 3 frames per second, regardless of settings
 
 * Improve frame rate
 * Add cursor to head tracking
+* Add more status messages
