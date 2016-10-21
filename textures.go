@@ -41,15 +41,12 @@ func paintTexture (img image.Image, u8Pix []uint8, clientWidth uint) []uint8 {
     newW := bounds.Max.X
     newH := bounds.Max.Y
 
-   // log.Printf("ClientWidth (%v) does not match image width(%v) and height(%v)", clientWidth, newW, newH)
     //if uint(newW) != clientWidth || uint(newH) != clientWidth {
     if (uint(newW) > clientWidth) || (uint(newH) > clientWidth) {
         panic(fmt.Sprintf("ClientWidth (%v) does not match image width(%v) and height(%v)", clientWidth, newW, newH))
     }
     if u8Pix == nil {
-        //log.Printf("Creating new byte buffer of width %v\n", clientWidth)
         dim := clientWidth*clientWidth*4 +4
-        //log.Printf("Creating a new buffer of size %v", dim)
         u8Pix = make([]uint8, dim, dim)
     }
 
@@ -115,7 +112,6 @@ func saveBuff(texWidth, texHeight uint, buff []byte, filename string) {
 }
 
 func Rtt(glctx gl.Context, texWidth, texHeight int, thunk Thunk) {
-	//log.Println("Starting Rtt")
 	glctx.BindFramebuffer(gl.FRAMEBUFFER, rtt_frameBuff)
 	glctx.Viewport(0, 0, texWidth, texHeight)
 	glctx.ActiveTexture(gl.TEXTURE0)
@@ -164,7 +160,7 @@ func dumpBuff(buff []uint8, size uint) {
     }
 }
 
-func string2Tex(glctx gl.Context, str string, tSize float64,  glTex gl.Texture) {
+func string2Tex(glctx gl.Context, str string, tSize float64, glTex gl.Texture) {
     img := DrawStringRGBA(tSize, color.RGBA{255,255,255,255}, str)
     saveImage(img, "texttest.png")
     w:= 128 //img.Bounds().Max.X
@@ -232,7 +228,6 @@ func DrawStringRGBA(txtSize float64, fontColor color.RGBA, txt string) *image.RG
     }
     re := d.MeasureString(txt)
     rect := image.Rect(0, 0, int((re + 0x3f) >> 6), int(txtSize))
-    //log.Println(txt, "大小", rect)
     rgba := image.NewRGBA(rect)
     d.Dst = rgba
 
@@ -245,14 +240,6 @@ func DrawStringRGBA(txtSize float64, fontColor color.RGBA, txt string) *image.RG
 }
 
 func LoadGameFont(fileName string) *truetype.Font {
-        //var f io.Reader
-        //log.Println(fileName)
-        //file, err := os.Open(fileName)
-        //if err != nil {
-            //log.Fatal(err)
-        //}
-        //defer file.Close()
-        //f = file
 
         fontBytes := sysFont.Monospace()
         f := bytes.NewReader(fontBytes)

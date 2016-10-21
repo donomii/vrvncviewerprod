@@ -58,8 +58,8 @@ import (
 import "github.com/go-gl/mathgl/mgl32"
         import "golang.org/x/mobile/exp/sensor"
 
-var clientWidth=uint(256)
-var clientHeight=uint(256)
+var clientWidth=uint(1024)
+var clientHeight=uint(768)
 var u8Pix []uint8
 var (
     startDrawing bool
@@ -394,16 +394,17 @@ func pasteText(tSize float64, ypos int, text string, u8Pix []uint8, transparent 
     //log.Printf("Chose texture size: %v\n", po2)
     wordBuff := paintTexture (img, nil, po2)
     startDrawing = true
+    bpp := uint(4)  //bytes per pixel
 
     h:= img.Bounds().Max.Y
     w:= uint(img.Bounds().Max.X)
     for i:=uint(0);i<uint(h); i++ {
-        for j := uint(0);j<w;j++ {
+        for j := uint(0);j<w; j++ {
             if (wordBuff[i*po2*4 + j*4]>128) || !transparent {
-                u8Pix[(uint(ypos)+i)*clientWidth*3+j*3] = wordBuff[i*po2*4 + j*4]
-                u8Pix[(uint(ypos)+i)*clientWidth*3+j*3 +1] = wordBuff[i*po2*4 + j*4 +1]
-                u8Pix[(uint(ypos)+i)*clientWidth*3+j*3 +2] = wordBuff[i*po2*4 + j*4 +2]
-                u8Pix[(uint(ypos)+i)*clientWidth*3+j*3 +3] = wordBuff[i*po2*4 + j*4 +3]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+j*bpp] = wordBuff[i*po2*4 + j*4]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+j*bpp +1] = wordBuff[i*po2*4 + j*4 +1]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+j*bpp +2] = wordBuff[i*po2*4 + j*4 +2]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+j*bpp +3] = wordBuff[i*po2*4 + j*4 +3]
             }
         }
     }
@@ -423,7 +424,7 @@ func onPaint(glctx gl.Context, sz size.Event) {
 
 
     
-    glctx.TexImage2D(gl.TEXTURE_2D, 0, int(clientWidth), int(clientHeight), gl.RGB, gl.UNSIGNED_BYTE, u8Pix)
+    glctx.TexImage2D(gl.TEXTURE_2D, 0, int(clientWidth), int(clientHeight), gl.RGBA, gl.UNSIGNED_BYTE, u8Pix)
 
 
     var view mgl32.Mat4
