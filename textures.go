@@ -2,6 +2,7 @@
 package main
 
 import (
+    "strings"
     sysFont "golang.org/x/mobile/exp/font"
     "io/ioutil"
     "bytes"
@@ -216,7 +217,6 @@ func glGenTextureFromFramebuffer(glctx gl.Context, w, h int) (gl.Framebuffer, gl
 }
 
 func DrawStringRGBA(txtSize float64, fontColor color.RGBA, txt string) *image.RGBA {
-
     txtFont := LoadGameFont("f1.ttf")
     d := &font.Drawer{
         Src: image.NewUniform(fontColor), // 字体颜色
@@ -242,6 +242,7 @@ func DrawStringRGBA(txtSize float64, fontColor color.RGBA, txt string) *image.RG
 func LoadGameFont(fileName string) *truetype.Font {
 
         fontBytes := sysFont.Monospace()
+        //fontBytes := sysFont.Default()
         f := bytes.NewReader(fontBytes)
         fontBytes, err := ioutil.ReadAll(f)
         if err != nil {
@@ -256,3 +257,58 @@ func LoadGameFont(fileName string) *truetype.Font {
         }
     return txtFont
 }
+
+
+
+func RenderPara(tSize float64, orig_xpos, ypos, maxX, maxY int, u8Pix []uint8, text string, transparent bool) {
+    letters := strings.Split(text, "")
+    xpos := orig_xpos
+    maxHeight := 0
+    for _, v := range letters {
+        if v == "\n" {
+            ypos = ypos + maxHeight
+            xpos = orig_xpos
+        } else {
+            img := DrawStringRGBA(tSize, color.RGBA{255,255,255,255}, v)
+            po2 := MaxI(NextPo2(img.Bounds().Max.X), NextPo2(img.Bounds().Max.Y))
+            if ypos + po2 > maxY {
+                return
+            }
+            PasteText(tSize, xpos, ypos, v, u8Pix, transparent)
+            maxHeight = MaxI(maxHeight, po2)
+            xpos = xpos+ po2*2
+        }
+    }
+}
+
+
+func MaxI(a, b int) int {
+    if a>b{
+        return a
+    }
+    return b
+}
+
+func PasteText(tSize float64,xpos, ypos int, text string, u8Pix []uint8, transparent bool) {
+    img := DrawStringRGBA(tSize, color.RGBA{255,255,255,255}, text)
+    po2 := uint(MaxI(NextPo2(img.Bounds().Max.X), NextPo2(img.Bounds().Max.Y)))
+    //log.Printf("Chose texture size: %v\n", po2)
+    wordBuff := paintTexture (img, nil, po2)
+    startDrawing = true
+    bpp := uint(4)  //bytes per pixel
+
+    h:= img.Bounds().Max.Y
+    w:= uint(img.Bounds().Max.X)
+    for i:=uint(0);i<uint(h); i++ {
+        for j := uint(0);j<w; j++ {
+            if (wordBuff[i*po2*4 + j*4]>128) || !transparent {
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp]    = wordBuff[i*po2*4 + j*4]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp +1] = wordBuff[i*po2*4 + j*4 +1]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp +2] = wordBuff[i*po2*4 + j*4 +2]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp +3] = wordBuff[i*po2*4 + j*4 +3]
+            }
+        }
+    }
+}
+
+
