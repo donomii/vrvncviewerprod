@@ -62,13 +62,18 @@ if err != nil {
             rects := msg.(*vnc.FramebufferUpdate).Rects
             for _,v := range rects {
             startDrawing = true
-            for i:=uint(0);i<uint(v.Height); i++ {
-                start := (uint(v.Y)+i)*clientWidth*3 + uint(v.X)*3
+            bpp := uint(4)
+            for y:=uint(0);y<uint(v.Height); y++ {
+                start := (uint(v.Y)+y)*clientWidth*bpp + uint(v.X)*bpp
                 for j := uint(0);j<uint(v.Width);j++ {
-                    c := v.Enc.(*vnc.RawEncoding).Colors[i*uint(v.Width)+j]
-                    u8Pix[start+j*3] = uint8(c.R)
-                    u8Pix[start+j*3+1] = uint8(c.G)
-                    u8Pix[start+j*3+2] = uint8(c.B)
+                    sOffset := y*uint(v.Width)*bpp + j*bpp
+
+                    u8Pix[start+j*bpp]   = v.BytePix[sOffset] //uint8(c.R)
+                    u8Pix[start+j*bpp+1] = v.BytePix[sOffset+1] //uint8(c.G)
+                    u8Pix[start+j*bpp+2] = v.BytePix[sOffset+2] //uint8(c.B)
+                    u8Pix[start+j*bpp+3] = v.BytePix[sOffset+3] //uint8(255)
+
+
                 }
             }
         }

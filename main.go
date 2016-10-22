@@ -58,8 +58,8 @@ import (
 import "github.com/go-gl/mathgl/mgl32"
         import "golang.org/x/mobile/exp/sensor"
 
-var clientWidth=uint(1024)
-var clientHeight=uint(768)
+var clientWidth=uint(800)
+var clientHeight=uint(600)
 var u8Pix []uint8
 var (
     startDrawing bool
@@ -160,9 +160,9 @@ var texData = f32.Bytes(binary.LittleEndian,
 
 
 func do_profile() {
-    defer profile.Start(profile.MemProfile).Stop()
+    //defer profile.Start(profile.MemProfile).Stop()
     //defer profile.Start(profile.TraceProfile).Stop()
-    //defer profile.Start(profile.CPUProfile).Stop()
+    defer profile.Start(profile.CPUProfile).Stop()
     time.Sleep(60*time.Second)
 }
 
@@ -375,8 +375,8 @@ func onStop(glctx gl.Context) {
     log.Printf("Stopping...")
     //glctx.DeleteProgram(program)
     //glctx.DeleteBuffer(buf)
-    fps.Release()
-    images.Release()
+    //fps.Release()
+    //images.Release()
 }
 
 func transpose( m mgl32.Mat4) mgl32.Mat4{

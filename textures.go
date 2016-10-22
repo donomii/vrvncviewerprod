@@ -144,11 +144,11 @@ func Rtt(glctx gl.Context, texWidth, texHeight int, thunk Thunk) {
 	fmt.Printf("done \n")
 }
 
-func dumpBuff(buff []uint8, size uint) {
-    log.Printf("Dumping buffer with width %v\n", size)
-    for y := uint(0); y < size; y++ {
-        for x := uint(0); x < size; x++ {
-            i := (x + y*size) * 4
+func dumpBuff(buff []uint8, width, height uint) {
+    log.Printf("Dumping buffer with width, height %v,%v\n", width, height)
+    for y := uint(0); y < height; y++ {
+        for x := uint(0); x < width; x++ {
+            i := (x + y*width) * 4
             //log.Printf("Index: %v\n", i)
             if buff[i]>128 {
                 fmt.Printf("I")
@@ -163,9 +163,9 @@ func dumpBuff(buff []uint8, size uint) {
 func string2Tex(glctx gl.Context, str string, tSize float64, glTex gl.Texture) {
     img := DrawStringRGBA(tSize, color.RGBA{255,255,255,255}, str)
     saveImage(img, "texttest.png")
-    w:= 128 //img.Bounds().Max.X
+    w:= 128 //img.Bounds().Max.X  //FIXME
     buff := paintTexture (img, nil, uint(w))
-    dumpBuff(buff, uint(w))
+    dumpBuff(buff, uint(w), uint(w))
     uploadTex(glctx, glTex, w, w, buff)
 }
 
