@@ -1,6 +1,5 @@
 package main
 
-import "math"
 import "image"
 import "github.com/donomii/go-vnc"
 import "net"
@@ -11,9 +10,6 @@ import "golang.org/x/net/context"
 var im *image.NRGBA
 
 
-func NextPo2(n int) int {
-    return int(math.Pow(2,math.Ceil(math.Log2(float64(n)))))
-}
 
 func run_vnc (server_port string) {
 // Establish TCP connection to VNC server.

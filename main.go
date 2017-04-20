@@ -29,8 +29,11 @@
 package main
 
 import "github.com/pkg/profile"
+import "image/color"
 import (
-    "strings"
+"golang.org/x/mobile/event/key"
+    "io/ioutil"
+    _ "strings"
     "net"
     "errors"
     "encoding/binary"
@@ -57,6 +60,7 @@ import (
 import "github.com/go-gl/mathgl/mgl32"
         import "golang.org/x/mobile/exp/sensor"
 
+var txtBuff string
 var clientWidth=uint(800)
 var clientHeight=uint(600)
 var u8Pix []uint8
@@ -157,6 +161,9 @@ var texData = f32.Bytes(binary.LittleEndian,
     0.0, 0.0, 0.9, // bottom right
 )
 
+var line = 0
+var cursor = 0
+
 
 func do_profile() {
     //defer profile.Start(profile.MemProfile).Stop()
@@ -165,7 +172,10 @@ func do_profile() {
     time.Sleep(60*time.Second)
 }
 
+var activeFormatter FormatParams
 func main() {
+    activeFormatter = FormatParams{&color.RGBA{255,255,255,255},0,0, 24.0,0,0}
+    txtBuff="A test string"
     log.Printf("Starting main...")
     sceneCam = sceneCamera.New()
     runtime.GOMAXPROCS(2)
@@ -214,7 +224,10 @@ func main() {
                 sz = e
                 reCalcNeeded = true
                 screenWidth = sz.WidthPx
+                clientWidth = uint(sz.WidthPx)
                 screenHeight = sz.HeightPx
+                clientHeight = uint(sz.HeightPx)
+                reDimBuff(screenWidth,screenHeight)
                 touchX = float32(sz.WidthPx /2)
                 touchY = float32(sz.HeightPx * 9/10)
                 if (sz.Orientation == size.OrientationLandscape) {
@@ -236,6 +249,10 @@ func main() {
                 // after this one is shown.
                 time.Sleep(100 * time.Millisecond)
                 a.Send(paint.Event{})
+            case key.Event:
+                    if e.Direction != key.DirRelease {
+                        handleEvent(a, e)
+                    }
             case touch.Event:
                 theatreCamera = mgl32.LookAt(0.0, 0.0, 0.1, 0.0, 0.0, -0.5, 0.0, 1.0, 0.0)
                 if e.Type == touch.TypeBegin {
@@ -290,46 +307,22 @@ func externalIP() (string, error) {
     return "", errors.New("are you connected to the network?")
 }
 
-func scanHosts() {
-    connectCh = make(chan bool, 30)
-    for i:=1; i<30; i++ {
-        connectCh <- true
-    }
-    ip, _ := externalIP()
-    ip_chunks := strings.Split(ip, ".")
-    classC := strings.Join(ip_chunks[:3], ".")
-    //log.Printf("IP: %v\n", classC)
-    for j:=1;j<255;j++ {
-        if scanOn {
-            RenderPara(50.0, 240,240, 800, 600, u8Pix, fmt.Sprintf("Scanning\n%v.%v.%v.%v", ip_chunks[0], ip_chunks[1], ip_chunks[2], fmt.Sprintf("%v", j)), false)
-            testIP := fmt.Sprintf("%v.%v", classC, j)
-            //log.Printf("testIP: %v\n", testIP)
-            <-connectCh
-            //fmt.Printf("%v:5900\n",testIP)
-            go run_vnc(fmt.Sprintf("%v:5900",testIP))
-            <-connectCh
-            //fmt.Printf("http://%v:8080/\n",testIP)
-            go http_mjpeg(fmt.Sprintf("http://%v:8080/",testIP))
-        }
-    }
-    time.Sleep(500*time.Millisecond)
-    //fmt.Println("Finished scan")
-    scanHosts()
+func reDimBuff(x,y int) {
+    dim := x*y*4
+    u8Pix = make([]uint8, dim, dim)
 }
 
+var fname string
+
 func onStart(glctx gl.Context) {
+    if len(os.Args)>1 {
+        fname = os.Args[1]
+        log.Println("Loading file: ", fname)
+        b, _ := ioutil.ReadFile(fname)
+        txtBuff = string(b)
+    }
     log.Printf("Onstart callback...")
-    dim := clientWidth*clientHeight*4
-    u8Pix = make([]uint8, dim, dim)
-    go scanHosts()
-    fmt.Printf("Waiting on connnection\n")
-    //for {
-        //time.Sleep(50 * time.Millisecond)
-        //if startDrawing {
-            //break
-        //}
-    //}
-    //time.Sleep(3 * time.Second)
+    reDimBuff(int(clientWidth),int(clientHeight))
     var err error
     program, err = glutil.CreateProgram(glctx, vertexShader, fragmentShader)
     if err != nil {
@@ -385,6 +378,10 @@ func transpose( m mgl32.Mat4) mgl32.Mat4{
 }
 
 func onPaint(glctx gl.Context, sz size.Event) {
+    for i, _:= range u8Pix {
+        u8Pix[i] = 0
+    }
+    RenderPara(&activeFormatter, 5, 5, screenWidth, screenHeight, u8Pix, txtBuff, false, true)
     glctx.Enable(gl.BLEND)
     glctx.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     glctx.Enable( gl.DEPTH_TEST );
@@ -422,9 +419,7 @@ func onPaint(glctx gl.Context, sz size.Event) {
     // Tell the texture uniform sampler to use this texture in the shader by binding to texture unit 0.
     glctx.Uniform1i(u_Texture, 0);
 
-    glctx.Viewport(0,0, sz.WidthPx/2, sz.HeightPx)
-    glctx.DrawArrays(gl.TRIANGLES, 0, 6)
-    glctx.Viewport(sz.WidthPx/2,0, sz.WidthPx/2, sz.HeightPx)
+    //glctx.Viewport(0,0, sz.WidthPx/2, sz.HeightPx)
     glctx.DrawArrays(gl.TRIANGLES, 0, 6)
     glctx.DisableVertexAttribArray(position)
 }
@@ -448,12 +443,12 @@ varying vec2 v_TexCoordinate;   // This will be passed into the fragment shader.
 
     attribute vec4 position;
     varying vec4 color;
-    void main() {
+void main() {
         gl_Position = transform * position;
         color = vec4(1.0,1.0,1.0,1.0);
         // Pass through the texture coordinate.
         v_TexCoordinate = a_TexCoordinate;
-    }
+}
 `
 
 const fragmentShader = `#version 100

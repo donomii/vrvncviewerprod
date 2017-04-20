@@ -1,7 +1,9 @@
 // textures
 package main
 
+import "math"
 import (
+    "unicode"
     "strings"
     sysFont "golang.org/x/mobile/exp/font"
     "io/ioutil"
@@ -216,14 +218,23 @@ func glGenTextureFromFramebuffer(glctx gl.Context, w, h int) (gl.Framebuffer, gl
 	return f, t
 }
 
+var renderCache map[string]*image.RGBA
 func DrawStringRGBA(txtSize float64, fontColor color.RGBA, txt string) *image.RGBA {
+    cacheKey := fmt.Sprintf("%v,%v,%v", txtSize, fontColor, txt)
+    if renderCache == nil {
+        renderCache = map[string]*image.RGBA{}
+    }
+    im, ok := renderCache[cacheKey]
+    if ok {
+        return im
+    }
     txtFont := LoadGameFont("f1.ttf")
     d := &font.Drawer{
         Src: image.NewUniform(fontColor), // 字体颜色
         Face: truetype.NewFace(txtFont, &truetype.Options{
             Size:    txtSize,
             DPI:     72,
-            Hinting: font.HintingNone,
+            Hinting: font.HintingFull,
         }),
     }
     re := d.MeasureString(txt)
@@ -233,9 +244,10 @@ func DrawStringRGBA(txtSize float64, fontColor color.RGBA, txt string) *image.RG
 
     d.Dot = fixed.Point26_6{
         X: fixed.I(0),
-        Y: fixed.I(rect.Max.Y),
+        Y: fixed.I(rect.Max.Y*3/4),
     }
     d.DrawString(txt)
+    renderCache[cacheKey] = rgba
     return rgba
 }
 
@@ -259,24 +271,108 @@ func LoadGameFont(fileName string) *truetype.Font {
 }
 
 
+type FormatParams struct {
+  Colour *color.RGBA
+  Line int
+  StartLinePos int      //Updated during render, holds the closest start of line, including soft line breaks
+  FontSize float64
+  FirstDrawnCharPos  int        //The first character to draw on the screen.  Anything before this is ignored
+  LastDrawnCharPos  int        //The last character that we were able to fit on the screen
+}
 
-func RenderPara(tSize float64, orig_xpos, ypos, maxX, maxY int, u8Pix []uint8, text string, transparent bool) {
+func drawCursor(xpos,ypos int, u8Pix []byte) {
+    //log.Printf("Hit Cursor: %v\n", cursor)
+
+    for xx:=int(0); xx<3; xx++ {
+        for yy:=int(0); yy<20; yy++ {
+            offset:= uint(yy+ypos)*clientWidth*4+uint(xx+xpos)*4
+            //log.Printf("Drawpos: %v", offset)
+            if offset>=0 && offset < uint(len(u8Pix)) {
+                u8Pix[offset] = 255
+                u8Pix[offset+1] = 255
+                u8Pix[offset+2] = 255
+                u8Pix[offset+3] = 255
+            }
+        }
+    }
+}
+func searchBackPage(txtBuf string, input FormatParams) int {
+    x:= input.StartLinePos
+    newLastDrawn := input.LastDrawnCharPos
+    for x=input.StartLinePos; x>0 && input.FirstDrawnCharPos < newLastDrawn ; x-- {
+        f := input
+        f.FirstDrawnCharPos=x
+        RenderPara(&f, 0,0,screenWidth,screenHeight, nil, txtBuf, false, false)
+        newLastDrawn = f.LastDrawnCharPos
+    }
+    return x
+}
+
+
+func RenderPara( f *FormatParams, orig_xpos, ypos, maxX, maxY int, u8Pix []uint8, text string, transparent bool, doDraw bool) {
+    //log.Printf("Cursor: %v\n", cursor)
     letters := strings.Split(text, "")
     xpos := orig_xpos
+    orig_fontSize := f.FontSize
     maxHeight := 0
-    for _, v := range letters {
-        if v == "\n" {
-            ypos = ypos + maxHeight
-            xpos = orig_xpos
-        } else {
-            img := DrawStringRGBA(tSize, color.RGBA{255,255,255,255}, v)
-            po2 := MaxI(NextPo2(img.Bounds().Max.X), NextPo2(img.Bounds().Max.Y))
-            if ypos + po2 > maxY {
-                return
+    wobblyMode := false
+    for i, v := range letters {
+    if i<f.FirstDrawnCharPos {
+        continue
+    }
+                if (cursor == i) && doDraw {
+                    drawCursor(xpos, ypos, u8Pix)
+                }
+        if unicode.IsUpper([]rune(v)[0]) {
+            if i>0 && letters[i-1] == " " {
+                f.Colour = &color.RGBA{255,0,0,255}
+                f.FontSize = f.FontSize*1.2
+                //log.Printf("Oversize start for %v at %v\n", v, i)
+            } else {
+                f.Colour = &color.RGBA{255,255,255,255}
             }
-            PasteText(tSize, xpos, ypos, v, u8Pix, transparent)
-            maxHeight = MaxI(maxHeight, po2)
-            xpos = xpos+ po2*2
+        } else {
+            f.Colour = &color.RGBA{255,255,255,255}
+        }
+        if (string(text[i]) == " ") || (string(text[i]) == "\n") {
+            f.FontSize = orig_fontSize
+            //log.Printf("Oversize end for %v at %v\n", v, i)
+        }
+        if string(text[i]) == "\n" {
+            ypos = ypos + maxHeight
+            //maxHeight=0
+            xpos = orig_xpos
+            f.Line++
+            f.StartLinePos = i
+        } else {
+            if line <= f.Line {
+                img := DrawStringRGBA(f.FontSize, *f.Colour, v)
+                po2 := MaxI(NextPo2(img.Bounds().Max.X), NextPo2(img.Bounds().Max.Y))
+
+                if xpos + po2 > maxX {
+                    ypos = ypos + maxHeight
+                    //maxHeight=0
+                    xpos = orig_xpos
+                    f.Line++
+                    f.StartLinePos = i
+                }
+                if ypos + po2 > maxY {
+                    f.LastDrawnCharPos = i-1
+                    return
+                }
+                ytweak :=0
+                if wobblyMode {
+                    ytweak = int(math.Sin(float64(xpos))*5.0)
+                }
+                if doDraw {
+                    PasteImg(img, xpos, ypos + ytweak, u8Pix, transparent)
+                }
+                if cursor == i {
+                    drawCursor(xpos, ypos, u8Pix)
+                }
+                maxHeight = MaxI(maxHeight, po2)
+                xpos = xpos+ po2/2
+            }
         }
     }
 }
@@ -289,7 +385,30 @@ func MaxI(a, b int) int {
     return b
 }
 
-func PasteText(tSize float64,xpos, ypos int, text string, u8Pix []uint8, transparent bool) {
+
+func PasteImg(img *image.RGBA, xpos, ypos int, u8Pix []uint8, transparent bool) {
+    po2 := uint(MaxI(NextPo2(img.Bounds().Max.X), NextPo2(img.Bounds().Max.Y)))
+    //log.Printf("Chose texture size: %v\n", po2)
+    wordBuff := paintTexture (img, nil, po2)
+    startDrawing = true
+    bpp := uint(4)  //bytes per pixel
+
+    h:= img.Bounds().Max.Y
+    w:= uint(img.Bounds().Max.X)
+    for i:=uint(0);i<uint(h); i++ {
+        for j := uint(0);j<w; j++ {
+            if (wordBuff[i*po2*4 + j*4]>128) || !transparent {
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp]    = wordBuff[i*po2*4 + j*4]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp +1] = wordBuff[i*po2*4 + j*4 +1]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp +2] = wordBuff[i*po2*4 + j*4 +2]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp +3] = wordBuff[i*po2*4 + j*4 +3]
+            }
+        }
+    }
+}
+
+
+func PasteText(tSize float64, xpos, ypos int, text string, u8Pix []uint8, transparent bool) {
     img := DrawStringRGBA(tSize, color.RGBA{255,255,255,255}, text)
     po2 := uint(MaxI(NextPo2(img.Bounds().Max.X), NextPo2(img.Bounds().Max.Y)))
     //log.Printf("Chose texture size: %v\n", po2)
@@ -302,13 +421,15 @@ func PasteText(tSize float64,xpos, ypos int, text string, u8Pix []uint8, transpa
     for i:=uint(0);i<uint(h); i++ {
         for j := uint(0);j<w; j++ {
             if (wordBuff[i*po2*4 + j*4]>128) || !transparent {
-                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp]    = wordBuff[i*po2*4 + j*4]
-                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp +1] = wordBuff[i*po2*4 + j*4 +1]
-                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp +2] = wordBuff[i*po2*4 + j*4 +2]
-                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)+j*bpp +3] = wordBuff[i*po2*4 + j*4 +3]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp]    = wordBuff[i*po2*4 + j*4]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp +1] = wordBuff[i*po2*4 + j*4 +1]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp +2] = wordBuff[i*po2*4 + j*4 +2]
+                u8Pix[(uint(ypos)+i)*clientWidth*bpp+uint(xpos)*bpp+j*bpp +3] = wordBuff[i*po2*4 + j*4 +3]
             }
         }
     }
 }
 
-
+func NextPo2(n int) int {
+    return int(math.Pow(2,math.Ceil(math.Log2(float64(n)))))
+}
