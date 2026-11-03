@@ -9,7 +9,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Toast;
 
-public class ViewerActivity extends Activity {
+public class ViewerActivity extends Activity implements StreamManager.StatusListener {
     static final String EXTRA_SPLIT_EYES = "splitEyes";
     private FrameView frameView;
     private SensorManager sensorManager;
@@ -49,7 +49,9 @@ public class ViewerActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (!StreamManager.getInstance().isConnected()) {
+        StreamManager manager = StreamManager.getInstance();
+        manager.setStatusListener(this);
+        if (!manager.isConnected()) {
             Toast.makeText(this, getString(R.string.error_no_stream), Toast.LENGTH_SHORT).show();
             finish();
             return;
@@ -62,6 +64,7 @@ public class ViewerActivity extends Activity {
 
     @Override
     protected void onPause() {
+        StreamManager.getInstance().setStatusListener(null);
         unregisterSensors();
         frameView.stop();
         super.onPause();
@@ -69,6 +72,22 @@ public class ViewerActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        finish();
+    }
+
+    @Override
+    public void onStatus(String message) {}
+
+    @Override
+    public void onConnected() {}
+
+    @Override
+    public void onError(String message) {
+        finish();
+    }
+
+    @Override
+    public void onDisconnected() {
         finish();
     }
 

@@ -17,6 +17,7 @@
 - Success shows a stream preview and stays on the welcome screen.
 - Start Fullscreen opens a single image in landscape. Cardboard (two eyes) opens two synchronized copies of the same flat feed, clipped and centered in the left and right halves. Each half uses the same mirror and head-pan settings.
 - The system Back button returns to the welcome screen.
+- A stream loss closes fullscreen or Cardboard view and returns to the welcome screen with the disconnect or error message. Connect again to retry.
 - Full-screen mode shows the feed in landscape.
 - If the screen is small, scale the feed to fit the screen.
 - If the screen is large, pan around the feed using head tracking (gyro + accelerometer).

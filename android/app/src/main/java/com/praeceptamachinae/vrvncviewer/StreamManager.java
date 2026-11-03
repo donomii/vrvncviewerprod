@@ -29,8 +29,9 @@ class StreamManager implements StreamSession.Listener {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<String, String> passwordCache = new HashMap<String, String>();
     private StreamSession session;
-    private StatusListener statusListener;
-    private boolean connected;
+    private volatile StatusListener statusListener;
+    private volatile boolean connected;
+    private volatile String lastStatus;
     private boolean errorState;
     private boolean flipHorizontal = true;
 
@@ -62,6 +63,10 @@ class StreamManager implements StreamSession.Listener {
 
     void setStatusListener(StatusListener listener) {
         statusListener = listener;
+        String status = lastStatus;
+        if (listener != null && status != null) {
+            listener.onStatus(status);
+        }
     }
 
     boolean isConnected() {
@@ -95,6 +100,7 @@ class StreamManager implements StreamSession.Listener {
     }
 
     private void notifyStatus(final String message) {
+        lastStatus = message;
         if (statusListener == null) {
             return;
         }
@@ -109,6 +115,7 @@ class StreamManager implements StreamSession.Listener {
     }
 
     private void notifyError(final String message) {
+        lastStatus = message;
         if (statusListener == null) {
             return;
         }
@@ -123,6 +130,7 @@ class StreamManager implements StreamSession.Listener {
     }
 
     private void notifyConnected() {
+        lastStatus = "Connected";
         if (statusListener == null) {
             return;
         }
@@ -137,6 +145,7 @@ class StreamManager implements StreamSession.Listener {
     }
 
     private void notifyDisconnected() {
+        lastStatus = "Disconnected";
         if (statusListener == null) {
             return;
         }
