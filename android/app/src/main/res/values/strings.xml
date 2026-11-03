@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VR VNC Viewer</string>
+    <string name="hint_url">Enter stream URL</string>
+    <string name="hint_password">VNC password (optional)</string>
+    <string name="label_flip">Mirror feed</string>
+    <string name="connect_vnc">Connect VNC</string>
+    <string name="connect_mjpeg">Connect MJPEG</string>
+    <string name="start_fullscreen">Start Fullscreen</string>
+    <string name="start_cardboard">Cardboard (two eyes)</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_connecting">Connecting...</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="error_no_stream">No active stream</string>
+    <string name="error_enter_url">Enter a URL</string>
+</resources>
