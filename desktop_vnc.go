@@ -15,15 +15,17 @@ import (
 )
 
 const (
+	vncCopyRect    = 1
 	vncDesktopSize = -223
 	vncIOTimeout   = 15 * time.Second
 	vncTextLimit   = 1 << 20
 )
 
 type vncReader struct {
-	conn  net.Conn
-	input *bufio.Reader
-	frame *image.RGBA
+	conn      net.Conn
+	input     *bufio.Reader
+	frame     *image.RGBA
+	hasPixels bool
 }
 
 func readDesktopVNC(ctx context.Context, address string, publish func(image.Image)) error {
@@ -52,9 +54,9 @@ func (reader *vncReader) setup(password string) error {
 	} else if err := reader.readServerInit(); err != nil {
 		return err
 	} else {
-		// SetPixelFormat requests little-endian 32-bit BGRX. SetEncodings requests Raw and DesktopSize.
+		// Request little-endian 32-bit BGRX, then CopyRect, Raw and DesktopSize.
 		settings := []byte{0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0,
-			2, 0, 0, 2, 0, 0, 0, 0}
+			2, 0, 0, 3, 0, 0, 0, vncCopyRect, 0, 0, 0, 0}
 		resizeEncoding := int32(vncDesktopSize)
 		_, err := reader.conn.Write(binary.BigEndian.AppendUint32(settings, uint32(resizeEncoding)))
 		return err
@@ -77,6 +79,7 @@ func (reader *vncReader) resize(width, height int) error {
 		return fmt.Errorf("VNC framebuffer %dx%d is outside 1–%d pixels per side", width, height, maxFrameSide)
 	} else {
 		reader.frame = image.NewRGBA(image.Rect(0, 0, width, height))
+		reader.hasPixels = false
 		return nil
 	}
 }
@@ -177,18 +180,25 @@ func (reader *vncReader) readRectangles(count int) (bool, error) {
 			return false, err
 		} else if encoding := int32(binary.BigEndian.Uint32(header[8:])); encoding == vncDesktopSize && index == count-1 {
 			return true, reader.resize(int(binary.BigEndian.Uint16(header[4:6])), int(binary.BigEndian.Uint16(header[6:8])))
-		} else if encoding != 0 {
-			return false, fmt.Errorf("unexpected VNC encoding %d, expected Raw or final DesktopSize", encoding)
+		} else if encoding != 0 && encoding != vncCopyRect {
+			return false, fmt.Errorf("unexpected VNC encoding %d, expected Raw, CopyRect or final DesktopSize", encoding)
 		} else {
 			x, y := int(binary.BigEndian.Uint16(header[0:2])), int(binary.BigEndian.Uint16(header[2:4]))
 			w, h := int(binary.BigEndian.Uint16(header[4:6])), int(binary.BigEndian.Uint16(header[6:8]))
+			rect := image.Rect(x, y, x+w, y+h)
 			remainingPixels -= w * h
 			if remainingPixels < 0 {
-				return false, fmt.Errorf("VNC update exceeded %d raw pixels", maxFrameSide*maxFrameSide)
-			} else if err := reader.readRawRect(image.Rect(x, y, x+w, y+h)); err != nil {
+				return false, fmt.Errorf("VNC update exceeded %d pixels", maxFrameSide*maxFrameSide)
+			} else if rect.Empty() || !rect.In(reader.frame.Rect) {
+				return false, fmt.Errorf("VNC rectangle %v is outside framebuffer %v", rect, reader.frame.Rect)
+			} else if encoding == vncCopyRect {
+				if err := reader.readCopyRect(rect); err != nil {
+					return false, err
+				}
+			} else if err := reader.readRawRect(rect); err != nil {
 				return false, err
 			} else {
-				continue
+				reader.hasPixels = true
 			}
 		}
 	}
@@ -196,21 +206,45 @@ func (reader *vncReader) readRectangles(count int) (bool, error) {
 }
 
 func (reader *vncReader) readRawRect(rect image.Rectangle) error {
-	if rect.Empty() || !rect.In(reader.frame.Rect) {
-		return fmt.Errorf("VNC rectangle %v is outside framebuffer %v", rect, reader.frame.Rect)
-	} else {
-		for y := rect.Min.Y; y < rect.Max.Y; y++ {
-			start := reader.frame.PixOffset(rect.Min.X, y)
-			row := reader.frame.Pix[start : start+4*rect.Dx()]
-			if _, err := io.ReadFull(reader.input, row); err != nil {
-				return err
-			} else {
-				for i := 0; i < len(row); i += 4 {
-					row[i], row[i+2], row[i+3] = row[i+2], row[i], 255
-				}
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		start := reader.frame.PixOffset(rect.Min.X, y)
+		row := reader.frame.Pix[start : start+4*rect.Dx()]
+		if _, err := io.ReadFull(reader.input, row); err != nil {
+			return err
+		} else {
+			for i := 0; i < len(row); i += 4 {
+				row[i], row[i+2], row[i+3] = row[i+2], row[i], 255
 			}
 		}
-		return nil
+	}
+	return nil
+}
+
+func (reader *vncReader) readCopyRect(rect image.Rectangle) error {
+	var coordinates [4]byte
+	if !reader.hasPixels {
+		return fmt.Errorf("VNC CopyRect needs framebuffer pixels before copying")
+	} else if _, err := io.ReadFull(reader.input, coordinates[:]); err != nil {
+		return err
+	} else {
+		x := int(binary.BigEndian.Uint16(coordinates[:2]))
+		y := int(binary.BigEndian.Uint16(coordinates[2:]))
+		source := image.Rect(x, y, x+rect.Dx(), y+rect.Dy())
+		if !source.In(reader.frame.Rect) {
+			return fmt.Errorf("VNC CopyRect source %v is outside framebuffer %v", source, reader.frame.Rect)
+		} else {
+			for i := 0; i < rect.Dy(); i++ {
+				row := i
+				if rect.Min.Y > y { // Preserve source rows when copying down.
+					row = rect.Dy() - 1 - i
+				}
+				from := reader.frame.PixOffset(x, y+row)
+				to := reader.frame.PixOffset(rect.Min.X, rect.Min.Y+row)
+				length := 4 * rect.Dx()
+				copy(reader.frame.Pix[to:to+length], reader.frame.Pix[from:from+length])
+			}
+			return nil
+		}
 	}
 }
 

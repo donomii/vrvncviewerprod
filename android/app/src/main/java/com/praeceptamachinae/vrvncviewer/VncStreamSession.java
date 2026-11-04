@@ -23,6 +23,7 @@ class VncStreamSession implements StreamSession, Runnable {
     private static final int MAX_REASON_BYTES = 64 * 1024;
     private static final int MAX_FRAME_SIDE = 4096;
     private static final int ENCODING_RAW = 0;
+    private static final int ENCODING_COPY_RECT = 1;
     private static final int ENCODING_DESKTOP_SIZE = -223;
     private static final int ENCODING_CURSOR = -239;
     private static final String DEFAULT_PASSWORD = "aaaaaaaa";
@@ -97,7 +98,7 @@ class VncStreamSession implements StreamSession, Runnable {
 
             PixelFormat desiredFormat = PixelFormat.create32();
             sendSetPixelFormat(out, desiredFormat);
-            sendSetEncodings(out, new int[]{ENCODING_RAW, ENCODING_DESKTOP_SIZE});
+            sendSetEncodings(out, new int[]{ENCODING_COPY_RECT, ENCODING_RAW, ENCODING_DESKTOP_SIZE});
             out.flush();
 
             int[] pixels = new int[fbWidth * fbHeight];
@@ -131,16 +132,23 @@ class VncStreamSession implements StreamSession, Runnable {
                         int rectW = readU16(in);
                         int rectH = readU16(in);
                         int encoding = in.readInt();
-                        if (encoding == ENCODING_RAW) {
-                            if (rectW == 0 || rectH == 0 || rectX + rectW > fbWidth || rectY + rectH > fbHeight) {
-                                throw new IOException("VNC rectangle " + rectX + "," + rectY + " " + rectW + "×" + rectH
-                                        + " is outside the " + fbWidth + "×" + fbHeight + " framebuffer");
-                            }
+                        if (encoding == ENCODING_RAW || encoding == ENCODING_COPY_RECT) {
+                            checkRectangle(rectX, rectY, rectW, rectH, fbWidth, fbHeight);
                             remainingPixels -= rectW * rectH;
                             if (remainingPixels < 0) {
-                                throw new IOException("VNC update exceeds " + MAX_FRAME_SIDE * MAX_FRAME_SIDE + " raw pixels");
+                                throw new IOException("VNC update exceeds " + MAX_FRAME_SIDE * MAX_FRAME_SIDE + " pixels");
                             }
-                            readRawRect(in, rectX, rectY, rectW, rectH, fbWidth, pixels, desiredFormat);
+                            if (encoding == ENCODING_RAW) {
+                                readRawRect(in, rectX, rectY, rectW, rectH, fbWidth, pixels, desiredFormat);
+                            } else {
+                                if (!hasFramebuffer) {
+                                    throw new IOException("VNC CopyRect needs framebuffer pixels before copying");
+                                }
+                                int sourceX = readU16(in);
+                                int sourceY = readU16(in);
+                                checkRectangle(sourceX, sourceY, rectW, rectH, fbWidth, fbHeight);
+                                copyRect(pixels, fbWidth, sourceX, sourceY, rectX, rectY, rectW, rectH);
+                            }
                             bitmap.setPixels(pixels, rectY * fbWidth + rectX, fbWidth,
                                     rectX, rectY, rectW, rectH);
                             hasFramebuffer = true;
@@ -347,6 +355,24 @@ class VncStreamSession implements StreamSession, Runnable {
         if (width <= 0 || height <= 0 || width > MAX_FRAME_SIDE || height > MAX_FRAME_SIDE) {
             throw new IOException("VNC framebuffer is " + width + "×" + height
                     + ", expected dimensions from 1 through " + MAX_FRAME_SIDE);
+        }
+    }
+
+    private static void checkRectangle(int x, int y, int width, int height, int frameWidth, int frameHeight) throws IOException {
+        if (width == 0 || height == 0 || x + width > frameWidth || y + height > frameHeight) {
+            throw new IOException("VNC rectangle " + x + "," + y + " " + width + "×" + height
+                    + " is outside the " + frameWidth + "×" + frameHeight + " framebuffer");
+        }
+    }
+
+    private static void copyRect(int[] pixels, int stride, int sourceX, int sourceY,
+                                 int destX, int destY, int width, int height) {
+        // Copy bottom-up when moving down so vertically overlapping rows survive.
+        boolean movingDown = destY > sourceY;
+        for (int i = 0; i < height; i++) {
+            int row = movingDown ? height - 1 - i : i;
+            System.arraycopy(pixels, (sourceY + row) * stride + sourceX,
+                    pixels, (destY + row) * stride + destX, width);
         }
     }
 
