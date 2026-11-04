@@ -1,0 +1,16 @@
+Decode a Hextile rectangle into the current framebuffer.
+
+Start without a background or foreground color. Visit tiles left to right and
+top to bottom. Limit each tile to sixteen pixels per side and shorten tiles at
+the right and bottom edges of the rectangle.
+
+For a raw tile, read opaque pixels and clear both carried colors. For a color
+tile, validate the flags. Read a new background or reuse a valid prior one.
+Read a new foreground when supplied. Clear the carried foreground when each
+subrectangle supplies its own color. Fill the tile with the background.
+
+When a tile supplies subrectangles, read their count and decode each position
+and size. Use the specified pixel or the valid foreground. Check each rectangle
+against the actual tile bounds and subtract its area from the update paint
+budget before painting. Reject invalid flags, missing colors, truncated data,
+out-of-bounds geometry, or budget exhaustion before publishing the update.
