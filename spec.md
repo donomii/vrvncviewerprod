@@ -40,3 +40,11 @@
 
 ## Assets
 - Reuse icon assets from `assets/` and `assets/drawable-*` in the Android project.
+
+## macOS MJPEG viewer
+
+Run `./run.sh` to build and open the native viewer on macOS. Edit the single line in `desktop-stream.txt` to select an HTTP or HTTPS multipart MJPEG feed. The default is `http://127.0.0.1:8080/`. Reopen the viewer to connect to a different address or retry after a stream ends.
+
+The resizable window shows the latest decoded frame, fitted to preserve its proportions. Press Space to switch between a single view and two identical views side by side. The status line explains the shortcut and reports a failed or ended stream. The preview clears when a stream ends. A frame may occupy up to 8 MiB of JPEG data and measure up to 4,096 pixels per side. Eight seconds without a complete frame closes the connection. Closing the window cancels the stream.
+
+`./demo.sh` opens the viewer with a synthetic feed served on the same Mac. `./test.sh` builds and runs `-test`, which receives a demo frame over HTTP and checks the composed pixels in both eye views. `./build.sh` and `./install.sh` place the executable in `.build/`. The Android app provides VNC, headset motion and mobile viewing.

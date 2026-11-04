@@ -1,3 +1,5 @@
+//go:build !darwin || ios
+
 // textures
 package main
 
