@@ -79,7 +79,7 @@ public class ViewerActivity extends Activity implements StreamManager.StatusList
     public void onStatus(String message) {}
 
     @Override
-    public void onConnected() {}
+    public void onConnected(String url) {}
 
     @Override
     public void onError(String message) {

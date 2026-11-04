@@ -89,7 +89,6 @@ public class MainActivity extends Activity implements StreamManager.StatusListen
             Toast.makeText(this, getString(R.string.error_enter_url), Toast.LENGTH_SHORT).show();
             return;
         }
-        statusText.setText(getString(R.string.status_connecting));
         String password = null;
         if (type == StreamManager.StreamType.VNC) {
             String inputPassword = passwordInput.getText().toString();
@@ -104,7 +103,7 @@ public class MainActivity extends Activity implements StreamManager.StatusListen
                 streamManager.cachePassword(url, inputPassword);
             }
         }
-        streamManager.connect(type, url, password);
+        previewView.setFrameStore(streamManager.connect(type, url, password));
     }
 
     private void openFullscreen(boolean splitEyes) {
@@ -128,9 +127,8 @@ public class MainActivity extends Activity implements StreamManager.StatusListen
     }
 
     @Override
-    public void onConnected() {
+    public void onConnected(String url) {
         statusText.setText(getString(R.string.status_connected));
-        String url = urlInput.getText().toString().trim();
         urlStore.add(this, url);
         refreshUrls();
     }

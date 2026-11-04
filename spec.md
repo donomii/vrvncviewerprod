@@ -15,9 +15,10 @@
 - Tap a button to connect to a new stream.
 - Failure shows an error and stays on the welcome screen.
 - Success shows a stream preview and stays on the welcome screen.
+- Connecting again clears the preview and switches to the new stream immediately. The previous stream closes in the background. Only the selected connection can update the preview and connection status. A successful connection saves the submitted address, even if the URL field has since changed.
 - Start Fullscreen opens a single image in landscape. Cardboard (two eyes) opens two synchronized copies of the same flat feed, clipped and centered in the left and right halves. Each half uses the same mirror and head-pan settings.
 - The system Back button returns to the welcome screen.
-- A stream loss closes fullscreen or Cardboard view and returns to the welcome screen with the disconnect or error message. Connect again to retry.
+- A stream loss clears the preview, closes fullscreen or Cardboard view, and returns to the welcome screen with the disconnect or error message. Connect again to retry.
 - Full-screen mode shows the feed in landscape.
 - If the screen is small, scale the feed to fit the screen.
 - If the screen is large, pan around the feed using head tracking (gyro + accelerometer).

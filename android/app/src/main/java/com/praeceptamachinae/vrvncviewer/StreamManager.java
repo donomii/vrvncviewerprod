@@ -6,7 +6,7 @@ import android.os.Looper;
 import java.util.HashMap;
 import java.util.Map;
 
-class StreamManager implements StreamSession.Listener {
+class StreamManager {
     enum StreamType {
         VNC,
         MJPEG
@@ -15,7 +15,7 @@ class StreamManager implements StreamSession.Listener {
     interface StatusListener {
         void onStatus(String message);
         void onError(String message);
-        void onConnected();
+        void onConnected(String url);
         void onDisconnected();
     }
 
@@ -25,14 +25,14 @@ class StreamManager implements StreamSession.Listener {
         return INSTANCE;
     }
 
-    private final FrameStore frameStore = new FrameStore();
+    private FrameStore frameStore = new FrameStore();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<String, String> passwordCache = new HashMap<String, String>();
     private StreamSession session;
-    private volatile StatusListener statusListener;
-    private volatile boolean connected;
-    private volatile String lastStatus;
-    private boolean errorState;
+    // Connection state and activity callbacks are owned by the main thread.
+    private StatusListener statusListener;
+    private boolean connected;
+    private String lastStatus;
     private boolean flipHorizontal = true;
 
     FrameStore getFrameStore() {
@@ -73,111 +73,70 @@ class StreamManager implements StreamSession.Listener {
         return connected;
     }
 
-    void connect(StreamType type, String url, String password) {
-        disconnect();
-        frameStore.clear();
+    FrameStore connect(StreamType type, String url, String password) {
+        StreamSession previous = session;
+        frameStore = new FrameStore();
         connected = false;
-        errorState = false;
-        notifyStatus("Connecting...");
-
-        StreamSession next;
+        lastStatus = "Connecting...";
+        if (statusListener != null) {
+            statusListener.onStatus(lastStatus);
+        }
+        SessionListener listener = new SessionListener(frameStore, url);
         if (type == StreamType.MJPEG) {
-            next = new MjpegStreamSession(url, frameStore, this);
+            session = new MjpegStreamSession(url, frameStore, listener);
         } else {
-            next = new VncStreamSession(url, password, frameStore, this);
+            session = new VncStreamSession(url, password, frameStore, listener);
         }
-        session = next;
+        if (previous != null) {
+            // Closing a network stream can wait for an in-progress read.
+            new Thread(previous::stop, "Stream-Close").start();
+        }
         session.start();
+        return frameStore;
     }
 
-    void disconnect() {
-        if (session != null) {
-            session.stop();
-            session = null;
-        }
-        connected = false;
-        notifyDisconnected();
-    }
+    private final class SessionListener implements StreamSession.Listener {
+        private final FrameStore frames;
+        private final String url;
 
-    private void notifyStatus(final String message) {
-        lastStatus = message;
-        if (statusListener == null) {
-            return;
+        SessionListener(FrameStore frames, String url) {
+            this.frames = frames;
+            this.url = url;
         }
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (statusListener != null) {
-                    statusListener.onStatus(message);
+
+        @Override
+        public void onConnected() {
+            mainHandler.post(() -> {
+                if (frames == frameStore) {
+                    connected = true;
+                    lastStatus = "Connected";
+                    if (statusListener != null) statusListener.onConnected(url);
                 }
-            }
-        });
-    }
-
-    private void notifyError(final String message) {
-        lastStatus = message;
-        if (statusListener == null) {
-            return;
+            });
         }
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (statusListener != null) {
-                    statusListener.onError(message);
-                }
-            }
-        });
-    }
 
-    private void notifyConnected() {
-        lastStatus = "Connected";
-        if (statusListener == null) {
-            return;
+        @Override
+        public void onError(String message, Exception e) {
+            mainHandler.post(() -> {
+                if (frames == frameStore) {
+                    connected = false;
+                    lastStatus = message;
+                    frames.clear();
+                    if (statusListener != null) statusListener.onError(message);
+                }
+            });
         }
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (statusListener != null) {
-                    statusListener.onConnected();
+
+        @Override
+        public void onDisconnected() {
+            mainHandler.post(() -> {
+                if (frames == frameStore && connected) {
+                    connected = false;
+                    lastStatus = "Disconnected";
+                    frames.clear();
+                    if (statusListener != null) statusListener.onDisconnected();
                 }
-            }
-        });
-    }
-
-    private void notifyDisconnected() {
-        lastStatus = "Disconnected";
-        if (statusListener == null) {
-            return;
-        }
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (statusListener != null) {
-                    statusListener.onDisconnected();
-                }
-            }
-        });
-    }
-
-    @Override
-    public void onConnected() {
-        connected = true;
-        errorState = false;
-        notifyConnected();
-    }
-
-    @Override
-    public void onError(String message, Exception e) {
-        connected = false;
-        errorState = true;
-        notifyError(message);
-    }
-
-    @Override
-    public void onDisconnected() {
-        connected = false;
-        if (!errorState) {
-            notifyDisconnected();
+            });
         }
     }
 }
