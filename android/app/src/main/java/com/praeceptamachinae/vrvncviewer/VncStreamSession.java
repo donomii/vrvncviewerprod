@@ -21,6 +21,7 @@ class VncStreamSession implements StreamSession, Runnable {
     private static final int SECURITY_NONE = 1;
     private static final int SECURITY_VNC = 2;
     private static final int MAX_REASON_BYTES = 64 * 1024;
+    private static final int MAX_FRAME_SIDE = 4096;
     private static final int ENCODING_RAW = 0;
     private static final int ENCODING_DESKTOP_SIZE = -223;
     private static final int ENCODING_CURSOR = -239;
@@ -89,13 +90,14 @@ class VncStreamSession implements StreamSession, Runnable {
 
             int fbWidth = readU16(in);
             int fbHeight = readU16(in);
+            checkFrameSize(fbWidth, fbHeight);
             PixelFormat.read(in);
             int nameLen = readU32(in);
             readBytes(in, nameLen);
 
             PixelFormat desiredFormat = PixelFormat.create32();
             sendSetPixelFormat(out, desiredFormat);
-            sendSetEncodings(out, new int[]{ENCODING_RAW});
+            sendSetEncodings(out, new int[]{ENCODING_RAW, ENCODING_DESKTOP_SIZE});
             out.flush();
 
             int[] pixels = new int[fbWidth * fbHeight];
@@ -121,6 +123,8 @@ class VncStreamSession implements StreamSession, Runnable {
                 if (messageType == 0) {
                     in.readUnsignedByte(); // padding
                     int rectCount = readU16(in);
+                    int remainingPixels = MAX_FRAME_SIDE * MAX_FRAME_SIDE;
+                    boolean updated = false;
                     for (int i = 0; i < rectCount; i++) {
                         int rectX = readU16(in);
                         int rectY = readU16(in);
@@ -128,33 +132,50 @@ class VncStreamSession implements StreamSession, Runnable {
                         int rectH = readU16(in);
                         int encoding = in.readInt();
                         if (encoding == ENCODING_RAW) {
-                            int bytesPerPixel = desiredFormat.bitsPerPixel / 8;
-                            int dataLen = rectW * rectH * bytesPerPixel;
-                            byte[] rectData = readBytes(in, dataLen);
-                            if (rectData == null) {
-                                throw new IOException("Missing framebuffer data");
+                            if (rectW == 0 || rectH == 0 || rectX + rectW > fbWidth || rectY + rectH > fbHeight) {
+                                throw new IOException("VNC rectangle " + rectX + "," + rectY + " " + rectW + "×" + rectH
+                                        + " is outside the " + fbWidth + "×" + fbHeight + " framebuffer");
                             }
-                            applyRawRect(rectData, rectX, rectY, rectW, rectH, fbWidth, pixels, desiredFormat);
+                            remainingPixels -= rectW * rectH;
+                            if (remainingPixels < 0) {
+                                throw new IOException("VNC update exceeds " + MAX_FRAME_SIDE * MAX_FRAME_SIDE + " raw pixels");
+                            }
+                            readRawRect(in, rectX, rectY, rectW, rectH, fbWidth, pixels, desiredFormat);
                             bitmap.setPixels(pixels, rectY * fbWidth + rectX, fbWidth,
                                     rectX, rectY, rectW, rectH);
                             hasFramebuffer = true;
+                            updated = true;
                         } else if (encoding == ENCODING_DESKTOP_SIZE) {
+                            if (i != rectCount - 1) {
+                                throw new IOException("VNC DesktopSize must be the final rectangle in an update");
+                            }
+                            checkFrameSize(rectW, rectH);
+                            int[] resized = new int[rectW * rectH];
+                            int sharedWidth = Math.min(fbWidth, rectW);
+                            for (int row = 0; row < Math.min(fbHeight, rectH); row++) {
+                                System.arraycopy(pixels, row * fbWidth, resized, row * rectW, sharedWidth);
+                            }
                             fbWidth = rectW;
                             fbHeight = rectH;
-                            pixels = new int[fbWidth * fbHeight];
+                            pixels = resized;
                             bitmap = Bitmap.createBitmap(fbWidth, fbHeight, Bitmap.Config.RGB_565);
+                            bitmap.setPixels(pixels, 0, fbWidth, 0, 0, fbWidth, fbHeight);
+                            // Keep the previously published image until the server supplies pixels at the new size.
                             hasFramebuffer = false;
+                            updated = false;
                         } else if (encoding == ENCODING_CURSOR) {
                             int bytesPerPixel = desiredFormat.bitsPerPixel / 8;
                             int pixelBytes = rectW * rectH * bytesPerPixel;
                             int maskBytes = ((rectW + 7) / 8) * rectH;
                             readBytes(in, pixelBytes + maskBytes);
                         } else {
-                            skipEncoding(in, encoding, rectW, rectH, desiredFormat);
+                            throw new IOException("Unsupported VNC encoding: " + encoding);
                         }
                     }
-                    frameStore.updateFrame(bitmap);
-                    requestUpdate(out, true, fbWidth, fbHeight);
+                    if (updated) {
+                        frameStore.updateFrame(bitmap);
+                    }
+                    requestUpdate(out, hasFramebuffer, fbWidth, fbHeight);
                     out.flush();
                 } else if (messageType == 2) {
                     // bell
@@ -322,22 +343,21 @@ class VncStreamSession implements StreamSession, Runnable {
         }
     }
 
-    private static void skipEncoding(DataInputStream in, int encoding, int w, int h, PixelFormat format) throws IOException {
-        if (encoding == ENCODING_RAW) {
-            int bytesPerPixel = format.bitsPerPixel / 8;
-            int dataLen = w * h * bytesPerPixel;
-            readBytes(in, dataLen);
-            return;
+    private static void checkFrameSize(int width, int height) throws IOException {
+        if (width <= 0 || height <= 0 || width > MAX_FRAME_SIDE || height > MAX_FRAME_SIDE) {
+            throw new IOException("VNC framebuffer is " + width + "×" + height
+                    + ", expected dimensions from 1 through " + MAX_FRAME_SIDE);
         }
-        throw new IOException("Unsupported encoding: " + encoding);
     }
 
-    private static void applyRawRect(byte[] data, int rectX, int rectY, int rectW, int rectH,
-                                     int fbWidth, int[] pixels, PixelFormat format) {
+    private static void readRawRect(DataInputStream in, int rectX, int rectY, int rectW, int rectH,
+                                    int fbWidth, int[] pixels, PixelFormat format) throws IOException {
         int bytesPerPixel = format.bitsPerPixel / 8;
-        int offset = 0;
+        byte[] data = new byte[rectW * bytesPerPixel];
         for (int y = 0; y < rectH; y++) {
+            in.readFully(data);
             int rowStart = (rectY + y) * fbWidth + rectX;
+            int offset = 0;
             for (int x = 0; x < rectW; x++) {
                 int raw = readPixel(data, offset, bytesPerPixel, format.bigEndian);
                 int r = scaleColor((raw >> format.redShift) & format.redMax, format.redMax);

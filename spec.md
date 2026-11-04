@@ -29,6 +29,7 @@
 ## Implementation details (current)
 - Java implementation under `android/`.
 - Android negotiates RFB 3.3, 3.7, and 3.8 with unauthenticated access or classic VNC password authentication. [RFB version differences](https://www.rfc-editor.org/rfc/rfc6143.html#appendix-A)
+- Android requests Raw and DesktopSize. It keeps displaying the previous image while requesting a full update after the server changes resolution. It preserves overlapping pixels internally for servers that send only part of the new frame. Frame dimensions are limited to 4,096 pixels per side, and out-of-bounds Raw rectangles are rejected. [DesktopSize protocol](https://www.rfc-editor.org/rfc/rfc6143.html#section-7.8.2)
 - VNC password is used if provided; otherwise fallback password is `aaaaaaaa`.
 - Password cache is in-memory only and keyed by URL for the current session.
 - Mirror/flip state applies to both preview and full-screen and defaults to enabled.
