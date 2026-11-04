@@ -18,6 +18,9 @@ import javax.crypto.spec.SecretKeySpec;
 class VncStreamSession implements StreamSession, Runnable {
     private static final int CONNECT_TIMEOUT_MS = 1500;
     private static final int READ_TIMEOUT_MS = 5000;
+    private static final int SECURITY_NONE = 1;
+    private static final int SECURITY_VNC = 2;
+    private static final int MAX_REASON_BYTES = 64 * 1024;
     private static final int ENCODING_RAW = 0;
     private static final int ENCODING_DESKTOP_SIZE = -223;
     private static final int ENCODING_CURSOR = -239;
@@ -79,41 +82,7 @@ class VncStreamSession implements StreamSession, Runnable {
             inputRef = in;
             outputRef = out;
 
-            byte[] serverVersion = readBytes(in, 12);
-            if (serverVersion == null) {
-                throw new IOException("Missing server version");
-            }
-            out.write("RFB 003.008\n".getBytes(StandardCharsets.US_ASCII));
-            out.flush();
-
-            int secCount = in.readUnsignedByte();
-            if (secCount == 0) {
-                String reason = readReason(in);
-                throw new IOException(reason);
-            }
-            byte[] secTypes = readBytes(in, secCount);
-            int secType = pickSecurityType(secTypes);
-            if (secType == -1) {
-                throw new IOException("No supported VNC security type");
-            }
-            out.writeByte(secType);
-            out.flush();
-
-            if (secType == 2) {
-                byte[] challenge = readBytes(in, 16);
-                if (challenge == null || challenge.length != 16) {
-                    throw new IOException("Invalid VNC challenge");
-                }
-                byte[] response = vncEncrypt(challenge, password);
-                out.write(response);
-                out.flush();
-            }
-
-            int secResult = readU32(in);
-            if (secResult != 0) {
-                String reason = readReason(in);
-                throw new IOException(reason);
-            }
+            authenticate(in, out);
 
             out.writeByte(1); // shared
             out.flush();
@@ -266,32 +235,91 @@ class VncStreamSession implements StreamSession, Runnable {
         }
     }
 
-    private static int pickSecurityType(byte[] types) {
+    private void authenticate(DataInputStream in, DataOutputStream out) throws Exception {
+        String version = new String(readBytes(in, 12), StandardCharsets.US_ASCII);
+        String reply = negotiatedVersion(version);
+        out.write(reply.getBytes(StandardCharsets.US_ASCII));
+        out.flush();
+
+        boolean legacy = "RFB 003.003\n".equals(reply);
+        boolean modern = "RFB 003.008\n".equals(reply);
+        int type = selectSecurity(in, out, legacy);
+        if (type == SECURITY_VNC) {
+            out.write(vncEncrypt(readBytes(in, 16), password));
+            out.flush();
+            checkSecurityResult(in, modern);
+        } else if (modern) {
+            checkSecurityResult(in, true);
+        }
+    }
+
+    private static String negotiatedVersion(String offered) throws IOException {
+        if (!offered.matches("RFB 003\\.[0-9]{3}\n") || offered.compareTo("RFB 003.003\n") < 0) {
+            throw new IOException("Unsupported server version, expected RFB 3.3 or later in the 3.x series");
+        } else if ("RFB 003.007\n".equals(offered) || "RFB 003.008\n".equals(offered)) {
+            return offered;
+        } else {
+            return "RFB 003.003\n";
+        }
+    }
+
+    private static int selectSecurity(DataInputStream in, DataOutputStream out, boolean legacy) throws IOException {
+        if (legacy) {
+            // RFB 3.3 sends a single U32 security type and expects no selection byte.
+            int type = readU32(in);
+            if (type == 0) {
+                throw new IOException(readReason(in));
+            } else if (type == SECURITY_NONE || type == SECURITY_VNC) {
+                return type;
+            } else {
+                throw new IOException("Unsupported VNC security type: " + type);
+            }
+        } else {
+            int count = in.readUnsignedByte();
+            if (count == 0) {
+                throw new IOException(readReason(in));
+            } else {
+                int type = pickSecurityType(readBytes(in, count));
+                out.writeByte(type);
+                out.flush();
+                return type;
+            }
+        }
+    }
+
+    private static void checkSecurityResult(DataInputStream in, boolean modern) throws IOException {
+        if (readU32(in) != 0) {
+            // Before RFB 3.8, a failed password challenge has no trailing reason.
+            throw new IOException(modern ? readReason(in) : "VNC server rejected authentication");
+        }
+    }
+
+    private static int pickSecurityType(byte[] types) throws IOException {
         boolean hasNone = false;
         boolean hasVnc = false;
         for (byte type : types) {
-            if (type == 1) {
+            if (type == SECURITY_NONE) {
                 hasNone = true;
-            } else if (type == 2) {
+            } else if (type == SECURITY_VNC) {
                 hasVnc = true;
             }
         }
         if (hasNone) {
-            return 1;
+            return SECURITY_NONE;
+        } else if (hasVnc) {
+            return SECURITY_VNC;
+        } else {
+            throw new IOException("No supported VNC security type");
         }
-        if (hasVnc) {
-            return 2;
-        }
-        return -1;
     }
 
     private static String readReason(DataInputStream in) throws IOException {
         int len = readU32(in);
-        byte[] data = readBytes(in, len);
-        if (data == null) {
-            return "Unknown error";
+        if (len > MAX_REASON_BYTES) {
+            throw new IOException("VNC server error message exceeds " + MAX_REASON_BYTES + " bytes");
+        } else {
+            return new String(readBytes(in, len), StandardCharsets.US_ASCII);
         }
-        return new String(data, StandardCharsets.US_ASCII);
     }
 
     private static void skipEncoding(DataInputStream in, int encoding, int w, int h, PixelFormat format) throws IOException {
