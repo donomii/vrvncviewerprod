@@ -64,20 +64,18 @@ public class FrameView extends ImageView {
     @Override
     protected void onDraw(Canvas canvas) {
         if (splitEyes) {
-            int eyeWidth = getWidth() / 2;
-            drawEye(canvas, 0, eyeWidth);
-            drawEye(canvas, getWidth() - eyeWidth, eyeWidth);
+            int viewWidth = getWidth();
+            int eyeWidth = viewWidth / 2;
+            for (int eye = 0; eye < 2; eye++) {
+                int checkpoint = canvas.save();
+                canvas.translate(eye * (viewWidth - eyeWidth), 0);
+                canvas.clipRect(0, 0, eyeWidth, getHeight());
+                super.onDraw(canvas);
+                canvas.restoreToCount(checkpoint);
+            }
         } else {
             super.onDraw(canvas);
         }
-    }
-
-    private void drawEye(Canvas canvas, int left, int width) {
-        int checkpoint = canvas.save();
-        canvas.translate(left, 0);
-        canvas.clipRect(0, 0, width, getHeight());
-        super.onDraw(canvas);
-        canvas.restoreToCount(checkpoint);
     }
 
     void start() {

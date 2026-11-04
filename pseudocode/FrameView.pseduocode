@@ -1,0 +1,11 @@
+Render the stream
+  Read the latest frame and version from the selected stream.
+  Update the displayed image when the frame or its contents change.
+  Clear the image if the stream has no frame.
+  Fit the image to the view or apply the current head tracking transform.
+  Apply horizontal mirroring when enabled.
+
+Draw
+  In single-image mode, draw the transformed image once.
+  In Cardboard mode, draw the same transformed image in each half.
+  Clip each eye to its own half of the view.
