@@ -9,6 +9,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 
 import javax.crypto.Cipher;
@@ -135,8 +136,19 @@ class VncStreamSession implements StreamSession, Runnable {
             requestUpdate(out, false, fbWidth, fbHeight);
             out.flush();
 
+            boolean hasFramebuffer = false;
             while (running) {
-                int messageType = in.readUnsignedByte();
+                int messageType;
+                try {
+                    messageType = in.readUnsignedByte();
+                } catch (SocketTimeoutException timeout) {
+                    // An incremental request may wait until the desktop changes.
+                    if (hasFramebuffer) {
+                        continue;
+                    } else {
+                        throw timeout;
+                    }
+                }
                 if (messageType == 0) {
                     in.readUnsignedByte(); // padding
                     int rectCount = readU16(in);
@@ -156,11 +168,13 @@ class VncStreamSession implements StreamSession, Runnable {
                             applyRawRect(rectData, rectX, rectY, rectW, rectH, fbWidth, pixels, desiredFormat);
                             bitmap.setPixels(pixels, rectY * fbWidth + rectX, fbWidth,
                                     rectX, rectY, rectW, rectH);
+                            hasFramebuffer = true;
                         } else if (encoding == ENCODING_DESKTOP_SIZE) {
                             fbWidth = rectW;
                             fbHeight = rectH;
                             pixels = new int[fbWidth * fbHeight];
                             bitmap = Bitmap.createBitmap(fbWidth, fbHeight, Bitmap.Config.RGB_565);
+                            hasFramebuffer = false;
                         } else if (encoding == ENCODING_CURSOR) {
                             int bytesPerPixel = desiredFormat.bitsPerPixel / 8;
                             int pixelBytes = rectW * rectH * bytesPerPixel;

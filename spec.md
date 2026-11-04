@@ -19,6 +19,7 @@
 - Start Fullscreen opens a single image in landscape. Cardboard (two eyes) opens two synchronized copies of the same flat feed, clipped and centered in the left and right halves. Each half uses the same mirror and head-pan settings.
 - The system Back button returns to the welcome screen.
 - A stream loss clears the preview, closes fullscreen or Cardboard view, and returns to the welcome screen with the disconnect or error message. Connect again to retry.
+- After the first VNC frame, a quiet connection keeps showing the last image until the desktop changes. The five-second read timeout still applies while waiting for the first frame or receiving an incomplete server message.
 - Full-screen mode shows the feed in landscape.
 - If the screen is small, scale the feed to fit the screen.
 - If the screen is large, pan around the feed using head tracking (gyro + accelerometer).
