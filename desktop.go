@@ -40,8 +40,10 @@ func main() {
 	if len(os.Args) == 2 && os.Args[1] == "-test" {
 		if err := desktopSelfTest(); err != nil {
 			log.Fatal(err)
+		} else if err := desktopVNCSelfTest(); err != nil {
+			log.Fatal(err)
 		} else {
-			fmt.Println("PASS: MJPEG frame and two-eye layout")
+			fmt.Println("PASS: MJPEG, VNC and two-eye layout")
 		}
 	} else {
 		address, closeDemo, err := desktopAddress(os.Args[1:])
@@ -94,7 +96,7 @@ func showDesktop(s screen.Screen, address string) error {
 func runDesktopViewer(s screen.Screen, window screen.Window, address string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	viewer := desktopViewer{screen: s, window: window, status: "Connecting to MJPEG stream…"}
+	viewer := desktopViewer{screen: s, window: window, status: "Connecting to stream..."}
 	defer viewer.releaseBuffer()
 	frames := make(chan image.Image, 1)
 	go runDesktopStream(ctx, window, address, frames)

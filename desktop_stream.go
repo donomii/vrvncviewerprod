@@ -11,6 +11,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -24,14 +25,33 @@ const (
 
 func validateDesktopURL(address string) error {
 	parsed, err := url.Parse(address)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil {
-		return fmt.Errorf("enter an HTTP or HTTPS MJPEG address in desktop-stream.txt")
-	} else {
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
+		return fmt.Errorf("enter an HTTP(S) MJPEG or vnc:// address in desktop-stream.txt")
+	} else if parsed.Scheme == "vnc" && (parsed.Path == "" || parsed.Path == "/") && parsed.RawQuery == "" && parsed.Fragment == "" {
 		return nil
+	} else if parsed.Scheme == "http" || parsed.Scheme == "https" {
+		return nil
+	} else {
+		return fmt.Errorf("enter an HTTP(S) MJPEG URL or vnc://host[:port] in desktop-stream.txt")
 	}
 }
 
 func readDesktopStream(ctx context.Context, address string, publish func(image.Image)) error {
+	if err := validateDesktopURL(address); err != nil {
+		return err
+	} else if parsed, _ := url.Parse(address); parsed.Scheme == "vnc" {
+		port := parsed.Port()
+		if port == "" {
+			return readDesktopVNC(ctx, net.JoinHostPort(parsed.Hostname(), "5900"), publish)
+		} else {
+			return readDesktopVNC(ctx, net.JoinHostPort(parsed.Hostname(), port), publish)
+		}
+	} else {
+		return readDesktopMJPEG(ctx, address, publish)
+	}
+}
+
+func readDesktopMJPEG(ctx context.Context, address string, publish func(image.Image)) error {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	watchdog := time.AfterFunc(frameTimeout, func() {

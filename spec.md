@@ -41,10 +41,12 @@
 ## Assets
 - Reuse icon assets from `assets/` and `assets/drawable-*` in the Android project.
 
-## macOS MJPEG viewer
+## macOS VNC and MJPEG viewer
 
-Run `./run.sh` to build and open the native viewer on macOS. Edit the single line in `desktop-stream.txt` to select an HTTP or HTTPS multipart MJPEG feed. The default is `http://127.0.0.1:8080/`. Reopen the viewer to connect to a different address or retry after a stream ends.
+Run `./run.sh` to build and open the native viewer on macOS. Edit the single line in `desktop-stream.txt` to select an HTTP or HTTPS multipart MJPEG feed or a `vnc://host[:port]` address. The default is `http://127.0.0.1:8080/`, and VNC uses port 5900 when omitted. Reopen the viewer to connect to a different address or retry after a stream ends.
 
-The resizable window shows the latest decoded frame, fitted to preserve its proportions. Press Space to switch between a single view and two identical views side by side. The status line explains the shortcut and reports a failed or ended stream. The preview clears when a stream ends. A frame may occupy up to 8 MiB of JPEG data and measure up to 4,096 pixels per side. Eight seconds without a complete frame closes the connection. Closing the window cancels the stream.
+The resizable window shows the latest decoded frame, fitted to preserve its proportions. Press Space to switch between a single view and two identical views side by side. The status line explains the shortcut and reports a failed or ended stream. The preview clears when a stream ends. An MJPEG frame may occupy up to 8 MiB of JPEG data and measure up to 4,096 pixels per side. Eight seconds without a complete MJPEG frame closes that connection. Closing the window cancels either kind of stream.
 
-`./demo.sh` opens the viewer with a synthetic feed served on the same Mac. `./test.sh` builds and runs `-test`, which receives a demo frame over HTTP and checks the composed pixels in both eye views. `./build.sh` and `./install.sh` place the executable in `.build/`. The Android app provides VNC, headset motion and mobile viewing.
+VNC is view-only. It uses RFB 3.3, 3.7 or 3.8 with unauthenticated access by default. Set `VRVNC_PASSWORD` in the launcher environment for a server that uses classic VNC password authentication. The viewer uses the first eight password bytes and does not save the password. It requests a full frame initially and after resize, then applies Raw rectangles to the previous frame. VNC frame dimensions are limited to 4,096 pixels per side. An unchanged desktop can leave its next update pending. Use a trusted network or an encrypted tunnel for VNC traffic. [RFB protocol specification](https://www.rfc-editor.org/rfc/rfc6143.html)
+
+`./demo.sh` opens the viewer with a synthetic MJPEG feed served on the same Mac. `./test.sh` builds and runs `-test`, which checks HTTP playback, both composed eye views, the VNC password response, and VNC incremental updates and validation. `./build.sh` and `./install.sh` place the executable in `.build/`. The Android app provides headset motion and mobile viewing.
