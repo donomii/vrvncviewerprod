@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"image/draw"
 	"io"
 	"net"
 	"os"
@@ -78,7 +79,12 @@ func (reader *vncReader) resize(width, height int) error {
 	if width < 1 || height < 1 || width > maxFrameSide || height > maxFrameSide {
 		return fmt.Errorf("VNC framebuffer %dx%d is outside 1–%d pixels per side", width, height, maxFrameSide)
 	} else {
-		reader.frame = image.NewRGBA(image.Rect(0, 0, width, height))
+		next := image.NewRGBA(image.Rect(0, 0, width, height))
+		if reader.frame != nil {
+			shared := reader.frame.Bounds().Intersect(next.Bounds())
+			draw.Draw(next, shared, reader.frame, shared.Min, draw.Src)
+		}
+		reader.frame = next
 		reader.hasPixels = false
 		return nil
 	}
@@ -138,7 +144,7 @@ func (reader *vncReader) handleMessage(kind byte, incremental *bool, publish fun
 		resized, err := reader.readUpdate()
 		if err != nil {
 			return err
-		} else if resized {
+		} else if resized || !reader.hasPixels {
 			*incremental = false
 			return reader.requestFrame(false)
 		} else {

@@ -90,14 +90,17 @@ func serveVNCCheck(conn net.Conn) error {
 		{[]byte{0, 0, 0, 0}, []byte{1}},
 		{[]byte{0, 2, 0, 1, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0, 0, 0, 0, 0},
 			[]byte{0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0, 2, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 255, 255, 255, 33, 3, 0, 0, 0, 0, 0, 0, 2, 0, 1}},
+		{[]byte{0, 0, 0, 0}, []byte{3, 0, 0, 0, 0, 0, 0, 2, 0, 1}},
 		// First update fills both pixels. Second update changes only the right pixel.
 		{[]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 0, 1, 0, 0, 0, 0, 0, 0, 255, 0, 255, 0, 0, 0}, []byte{3, 1, 0, 0, 0, 0, 0, 2, 0, 1}},
 		{[]byte{0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 255, 0, 0}, []byte{3, 1, 0, 0, 0, 0, 0, 2, 0, 1}},
 		// Copy the green right pixel to the left without sending pixel data.
 		{[]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0}, []byte{3, 1, 0, 0, 0, 0, 0, 2, 0, 1}},
-		{[]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 255, 255, 255, 33}, []byte{3, 0, 0, 0, 0, 0, 0, 1, 0, 1}},
-		// The resized framebuffer is one pixel wide. A rectangle at x=1 is invalid.
-		{[]byte{0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0}, nil},
+		{[]byte{0, 0, 0, 1, 0, 0, 0, 0, 0, 3, 0, 1, 255, 255, 255, 33}, []byte{3, 0, 0, 0, 0, 0, 0, 3, 0, 1}},
+		{[]byte{0, 0, 0, 0}, []byte{3, 0, 0, 0, 0, 0, 0, 3, 0, 1}},
+		// The server supplies only the new pixel. The previous two should stay green.
+		{[]byte{0, 0, 0, 1, 0, 2, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 255, 0, 0, 0}, []byte{3, 1, 0, 0, 0, 0, 0, 3, 0, 1}},
+		{[]byte{0, 0, 0, 1, 0, 3, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0}, nil},
 	}
 	for index, step := range steps {
 		if _, err := conn.Write(step.send); err != nil {
@@ -118,12 +121,15 @@ func checkVNCFixtureResult(frames []image.Image, streamErr, serverErr error) err
 	red, blue, green := color.RGBA{R: 255, A: 255}, color.RGBA{B: 255, A: 255}, color.RGBA{G: 255, A: 255}
 	if serverErr != nil {
 		return serverErr
-	} else if streamErr == nil || !strings.Contains(streamErr.Error(), "outside framebuffer") || len(frames) != 3 {
-		return fmt.Errorf("expected three valid VNC frames and an out-of-bounds rejection, got %d frames and %v", len(frames), streamErr)
+	} else if streamErr == nil || !strings.Contains(streamErr.Error(), "outside framebuffer") || len(frames) != 4 {
+		return fmt.Errorf("expected four valid VNC frames and an out-of-bounds rejection, got %d frames and %v", len(frames), streamErr)
 	} else if frames[0].At(0, 0) != red || frames[0].At(1, 0) != blue || frames[1].At(0, 0) != red || frames[1].At(1, 0) != green {
 		return fmt.Errorf("VNC fixture did not preserve the first snapshot and the unchanged pixel across the update")
 	} else if frames[2].At(0, 0) != green || frames[2].At(1, 0) != green {
 		return fmt.Errorf("VNC fixture did not copy the green pixel across the framebuffer")
+	} else if frames[2].Bounds().Dx() != 2 || frames[3].Bounds().Dx() != 3 ||
+		frames[3].At(0, 0) != green || frames[3].At(1, 0) != green || frames[3].At(2, 0) != blue {
+		return fmt.Errorf("VNC fixture did not preserve the overlapping pixels after a partial resize update")
 	} else {
 		return nil
 	}
