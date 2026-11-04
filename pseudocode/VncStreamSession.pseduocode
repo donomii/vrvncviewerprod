@@ -5,12 +5,20 @@ Start VNC stream
   Request the preferred pixel format, encodings and initial full frame.
 
 Handle server messages
-  Apply Raw and CopyRect rectangles inside the framebuffer bounds.
+  Apply Raw, CopyRect, and Hextile rectangles inside the framebuffer bounds.
   A final DesktopSize rectangle retains overlapping pixels and requests a full frame.
   Keep the last published frame while waiting for pixels at the new size.
   Publish updated pixels and request incremental updates once pixels are available.
   A quiet incremental request may wait indefinitely for changes.
   Ignore bells and discard clipboard or cursor payloads.
+
+Decode a Hextile rectangle
+  Decode tiles left to right and top to bottom, using smaller tiles at the edges.
+  For a raw tile, copy the decoded pixels and clear both carried colors.
+  Otherwise update the supplied colors and fill the tile with its background.
+  Apply each subrectangle using its explicit color or the carried foreground.
+  Clear the carried foreground when the tile uses explicit subrectangle colors.
+  Reject missing required colors, invalid tile bounds, and excessive subrectangle painting.
 
 Discard unused metadata
   Read the unsigned 32-bit text length for a desktop name or clipboard message.

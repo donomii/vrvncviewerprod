@@ -11,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -26,9 +27,16 @@ class VncStreamSession implements StreamSession, Runnable {
     private static final int MAX_FRAME_SIDE = 4096;
     private static final int ENCODING_RAW = 0;
     private static final int ENCODING_COPY_RECT = 1;
+    private static final int ENCODING_HEXTILE = 5;
     private static final int ENCODING_DESKTOP_SIZE = -223;
     private static final int ENCODING_CURSOR = -239;
     private static final String DEFAULT_PASSWORD = "aaaaaaaa";
+    private static final int HEXTILE_SIZE = 16;
+    private static final int HEXTILE_RAW = 1;
+    private static final int HEXTILE_BACKGROUND = 2;
+    private static final int HEXTILE_FOREGROUND = 4;
+    private static final int HEXTILE_SUBRECTS = 8;
+    private static final int HEXTILE_COLORED = 16;
 
     private final EndpointParser.HostPort endpoint;
     private final String password;
@@ -99,10 +107,11 @@ class VncStreamSession implements StreamSession, Runnable {
 
             PixelFormat desiredFormat = PixelFormat.create32();
             sendSetPixelFormat(out, desiredFormat);
-            sendSetEncodings(out, new int[]{ENCODING_COPY_RECT, ENCODING_RAW, ENCODING_DESKTOP_SIZE});
+            sendSetEncodings(out, new int[]{ENCODING_COPY_RECT, ENCODING_HEXTILE, ENCODING_RAW, ENCODING_DESKTOP_SIZE});
             out.flush();
 
             int[] pixels = new int[fbWidth * fbHeight];
+            byte[] rowBuffer = new byte[MAX_FRAME_SIDE * (desiredFormat.bitsPerPixel / 8)];
             Bitmap bitmap = Bitmap.createBitmap(fbWidth, fbHeight, Bitmap.Config.RGB_565);
 
             listener.onConnected();
@@ -126,6 +135,7 @@ class VncStreamSession implements StreamSession, Runnable {
                     in.readUnsignedByte(); // padding
                     int rectCount = readU16(in);
                     int remainingPixels = MAX_FRAME_SIDE * MAX_FRAME_SIDE;
+                    int remainingHextilePaint = 4 * remainingPixels;
                     boolean updated = false;
                     for (int i = 0; i < rectCount; i++) {
                         int rectX = readU16(in);
@@ -133,14 +143,17 @@ class VncStreamSession implements StreamSession, Runnable {
                         int rectW = readU16(in);
                         int rectH = readU16(in);
                         int encoding = in.readInt();
-                        if (encoding == ENCODING_RAW || encoding == ENCODING_COPY_RECT) {
+                        if (encoding == ENCODING_RAW || encoding == ENCODING_COPY_RECT || encoding == ENCODING_HEXTILE) {
                             checkRectangle(rectX, rectY, rectW, rectH, fbWidth, fbHeight);
                             remainingPixels -= rectW * rectH;
                             if (remainingPixels < 0) {
                                 throw new IOException("VNC update exceeds " + MAX_FRAME_SIDE * MAX_FRAME_SIDE + " pixels");
                             }
                             if (encoding == ENCODING_RAW) {
-                                readRawRect(in, rectX, rectY, rectW, rectH, fbWidth, pixels, desiredFormat);
+                                readRawRect(in, rectX, rectY, rectW, rectH, fbWidth, pixels, desiredFormat, rowBuffer);
+                            } else if (encoding == ENCODING_HEXTILE) {
+                                remainingHextilePaint = readHextileRect(in, rectX, rectY, rectW, rectH,
+                                        fbWidth, pixels, desiredFormat, rowBuffer, remainingHextilePaint);
                             } else {
                                 if (!hasFramebuffer) {
                                     throw new IOException("VNC CopyRect needs framebuffer pixels before copying");
@@ -382,22 +395,90 @@ class VncStreamSession implements StreamSession, Runnable {
     }
 
     private static void readRawRect(DataInputStream in, int rectX, int rectY, int rectW, int rectH,
-                                    int fbWidth, int[] pixels, PixelFormat format) throws IOException {
+                                    int fbWidth, int[] pixels, PixelFormat format, byte[] data) throws IOException {
         int bytesPerPixel = format.bitsPerPixel / 8;
-        byte[] data = new byte[rectW * bytesPerPixel];
         for (int y = 0; y < rectH; y++) {
-            in.readFully(data);
+            in.readFully(data, 0, rectW * bytesPerPixel);
             int rowStart = (rectY + y) * fbWidth + rectX;
             int offset = 0;
             for (int x = 0; x < rectW; x++) {
                 int raw = readPixel(data, offset, bytesPerPixel, format.bigEndian);
-                int r = scaleColor((raw >> format.redShift) & format.redMax, format.redMax);
-                int g = scaleColor((raw >> format.greenShift) & format.greenMax, format.greenMax);
-                int b = scaleColor((raw >> format.blueShift) & format.blueMax, format.blueMax);
-                pixels[rowStart + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                pixels[rowStart + x] = toArgb(raw, format);
                 offset += bytesPerPixel;
             }
         }
+    }
+
+    private static int readHextileRect(DataInputStream in, int x, int y, int width, int height,
+                                       int stride, int[] pixels, PixelFormat format, byte[] buffer,
+                                       int remainingPaint) throws IOException {
+        // Zero marks an unspecified color. Decoded colors always have opaque alpha.
+        int background = 0;
+        int foreground = 0;
+        for (int tileY = y; tileY < y + height; tileY += HEXTILE_SIZE) {
+            for (int tileX = x; tileX < x + width; tileX += HEXTILE_SIZE) {
+                int tileWidth = Math.min(HEXTILE_SIZE, x + width - tileX);
+                int tileHeight = Math.min(HEXTILE_SIZE, y + height - tileY);
+                int flags = in.readUnsignedByte();
+                if ((flags & HEXTILE_RAW) != 0) {
+                    readRawRect(in, tileX, tileY, tileWidth, tileHeight, stride, pixels, format, buffer);
+                    background = 0;
+                    foreground = 0;
+                    continue;
+                }
+                boolean colored = (flags & HEXTILE_COLORED) != 0;
+                boolean hasForeground = (flags & HEXTILE_FOREGROUND) != 0;
+                if ((flags & ~31) != 0 || (colored && hasForeground)) {
+                    throw new IOException("Invalid VNC Hextile flags " + flags);
+                }
+                if ((flags & HEXTILE_BACKGROUND) != 0) background = readColor(in, format, buffer);
+                if (background == 0) throw new IOException("VNC Hextile tile has no background color");
+                if (colored) {
+                    foreground = 0;
+                } else if (hasForeground) {
+                    foreground = readColor(in, format, buffer);
+                }
+                fillPixels(pixels, stride, tileX, tileY, tileWidth, tileHeight, background);
+                int count = (flags & HEXTILE_SUBRECTS) != 0 ? in.readUnsignedByte() : 0;
+                if (count > 0 && !colored && foreground == 0) {
+                    throw new IOException("VNC Hextile subrectangles have no foreground color");
+                }
+                for (int i = 0; i < count; i++) {
+                    int color = colored ? readColor(in, format, buffer) : foreground;
+                    int position = in.readUnsignedByte();
+                    int size = in.readUnsignedByte();
+                    int subX = position >> 4;
+                    int subY = position & 15;
+                    int subWidth = (size >> 4) + 1;
+                    int subHeight = (size & 15) + 1;
+                    checkRectangle(subX, subY, subWidth, subHeight, tileWidth, tileHeight);
+                    remainingPaint -= subWidth * subHeight;
+                    if (remainingPaint < 0) throw new IOException("VNC Hextile update exceeds its paint limit");
+                    fillPixels(pixels, stride, tileX + subX, tileY + subY, subWidth, subHeight, color);
+                }
+            }
+        }
+        return remainingPaint;
+    }
+
+    private static void fillPixels(int[] pixels, int stride, int x, int y, int width, int height, int color) {
+        for (int row = y; row < y + height; row++) {
+            int start = row * stride + x;
+            Arrays.fill(pixels, start, start + width, color);
+        }
+    }
+
+    private static int readColor(DataInputStream in, PixelFormat format, byte[] buffer) throws IOException {
+        int size = format.bitsPerPixel / 8;
+        in.readFully(buffer, 0, size);
+        return toArgb(readPixel(buffer, 0, size, format.bigEndian), format);
+    }
+
+    private static int toArgb(int raw, PixelFormat format) {
+        int r = scaleColor((raw >> format.redShift) & format.redMax, format.redMax);
+        int g = scaleColor((raw >> format.greenShift) & format.greenMax, format.greenMax);
+        int b = scaleColor((raw >> format.blueShift) & format.blueMax, format.blueMax);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     private static int scaleColor(int value, int max) {
