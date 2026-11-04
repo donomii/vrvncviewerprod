@@ -21,6 +21,8 @@ class VncStreamSession implements StreamSession, Runnable {
     private static final int SECURITY_NONE = 1;
     private static final int SECURITY_VNC = 2;
     private static final int MAX_REASON_BYTES = 64 * 1024;
+    private static final int MAX_TEXT_BYTES = 1024 * 1024;
+    private static final int DISCARD_BUFFER_BYTES = 8192;
     private static final int MAX_FRAME_SIDE = 4096;
     private static final int ENCODING_RAW = 0;
     private static final int ENCODING_COPY_RECT = 1;
@@ -93,8 +95,7 @@ class VncStreamSession implements StreamSession, Runnable {
             int fbHeight = readU16(in);
             checkFrameSize(fbWidth, fbHeight);
             PixelFormat.read(in);
-            int nameLen = readU32(in);
-            readBytes(in, nameLen);
+            discardText(in, "desktop name");
 
             PixelFormat desiredFormat = PixelFormat.create32();
             sendSetPixelFormat(out, desiredFormat);
@@ -172,10 +173,15 @@ class VncStreamSession implements StreamSession, Runnable {
                             hasFramebuffer = false;
                             updated = false;
                         } else if (encoding == ENCODING_CURSOR) {
-                            int bytesPerPixel = desiredFormat.bitsPerPixel / 8;
-                            int pixelBytes = rectW * rectH * bytesPerPixel;
-                            int maskBytes = ((rectW + 7) / 8) * rectH;
-                            readBytes(in, pixelBytes + maskBytes);
+                            if (rectW > MAX_FRAME_SIDE || rectH > MAX_FRAME_SIDE) {
+                                throw new MetadataLimitException("VNC cursor " + rectW + "×" + rectH
+                                        + " exceeds the " + MAX_FRAME_SIDE + "-pixel side limit");
+                            } else {
+                                int bytesPerPixel = desiredFormat.bitsPerPixel / 8;
+                                int pixelBytes = rectW * rectH * bytesPerPixel;
+                                int maskBytes = ((rectW + 7) / 8) * rectH;
+                                discard(in, pixelBytes + maskBytes);
+                            }
                         } else {
                             throw new IOException("Unsupported VNC encoding: " + encoding);
                         }
@@ -191,15 +197,14 @@ class VncStreamSession implements StreamSession, Runnable {
                     in.readUnsignedByte();
                     in.readUnsignedByte();
                     in.readUnsignedByte();
-                    int textLen = readU32(in);
-                    readBytes(in, textLen);
+                    discardText(in, "clipboard");
                 } else {
                     throw new IOException("Unsupported server message: " + messageType);
                 }
             }
         } catch (Exception e) {
             if (running) {
-                listener.onError("VNC connection failed", e);
+                listener.onError(e instanceof MetadataLimitException ? e.getMessage() : "VNC connection failed", e);
             }
         } finally {
             running = false;
@@ -453,6 +458,31 @@ class VncStreamSession implements StreamSession, Runnable {
             throw new IOException("Value too large");
         }
         return (int) value;
+    }
+
+    private static void discardText(DataInputStream in, String field) throws IOException {
+        long length = in.readInt() & 0xFFFFFFFFL;
+        if (length > MAX_TEXT_BYTES) {
+            throw new MetadataLimitException("VNC " + field + " length " + length
+                    + " exceeds " + MAX_TEXT_BYTES + " bytes");
+        } else {
+            discard(in, (int) length);
+        }
+    }
+
+    private static void discard(DataInputStream in, int length) throws IOException {
+        byte[] buffer = new byte[Math.min(length, DISCARD_BUFFER_BYTES)];
+        while (length > 0) {
+            int chunk = Math.min(length, buffer.length);
+            in.readFully(buffer, 0, chunk);
+            length -= chunk;
+        }
+    }
+
+    private static class MetadataLimitException extends IOException {
+        MetadataLimitException(String message) {
+            super(message);
+        }
     }
 
     private static byte[] readBytes(DataInputStream in, int len) throws IOException {

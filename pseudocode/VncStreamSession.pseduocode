@@ -1,0 +1,20 @@
+Start VNC stream
+  Parse the endpoint and negotiate the server version and authentication.
+  Read the framebuffer dimensions and validate them.
+  Discard the desktop name using the metadata rules below.
+  Request the preferred pixel format, encodings and initial full frame.
+
+Handle server messages
+  Apply Raw and CopyRect rectangles inside the framebuffer bounds.
+  A final DesktopSize rectangle retains overlapping pixels and requests a full frame.
+  Keep the last published frame while waiting for pixels at the new size.
+  Publish updated pixels and request incremental updates once pixels are available.
+  A quiet incremental request may wait indefinitely for changes.
+  Ignore bells and discard clipboard or cursor payloads.
+
+Discard unused metadata
+  Read the unsigned 32-bit text length for a desktop name or clipboard message.
+  Reject more than 1 MiB before reading its payload.
+  Reject cursor dimensions above 4,096 pixels per side before calculating payload size.
+  Discard exactly the declared payload using bounded memory.
+  Report oversized metadata and close the stream.
