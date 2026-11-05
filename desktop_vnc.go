@@ -28,6 +28,7 @@ type vncReader struct {
 	input     *bufio.Reader
 	frame     *image.RGBA
 	hasPixels bool
+	zrle      *zrleDecoder
 }
 
 func readDesktopVNC(ctx context.Context, address string, publish func(image.Image)) error {
@@ -57,7 +58,7 @@ func (reader *vncReader) setup(password string) error {
 		return err
 	} else {
 		// Request little-endian 32-bit BGRX and the supported rectangle encodings.
-		encodings := [...]int32{vncCopyRect, vncHextile, 0, vncDesktopSize, vncLastRect}
+		encodings := [...]int32{vncCopyRect, vncZRLE, vncHextile, 0, vncDesktopSize, vncLastRect}
 		settings := []byte{0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0,
 			2, 0, 0, byte(len(encodings))}
 		for _, encoding := range encodings {
@@ -108,6 +109,7 @@ func (reader *vncReader) requestFrame(incremental bool) error {
 }
 
 func (reader *vncReader) receiveFrames(publish func(image.Image)) error {
+	defer reader.closeZRLE()
 	if err := reader.requestFrame(false); err != nil {
 		return fmt.Errorf("request initial VNC frame: %w", err)
 	} else {
@@ -227,8 +229,10 @@ func (reader *vncReader) readPixelRect(encoding int32, rect image.Rectangle, pai
 		return reader.readCopyRect(rect)
 	case vncHextile:
 		return reader.readHextileRect(rect, paint)
+	case vncZRLE:
+		return reader.readZRLERect(rect)
 	default:
-		return fmt.Errorf("unexpected VNC encoding %d, expected Raw, CopyRect, Hextile, DesktopSize or LastRect", encoding)
+		return fmt.Errorf("unexpected VNC encoding %d, expected Raw, CopyRect, Hextile, ZRLE, DesktopSize or LastRect", encoding)
 	}
 }
 

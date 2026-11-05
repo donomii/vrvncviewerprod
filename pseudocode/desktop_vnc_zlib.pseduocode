@@ -1,0 +1,4 @@
+Inflate a ZRLE rectangle
+  Read compressed bytes in bounded chunks without reading into the next rectangle.
+  Retain zlib history for the next rectangle and release it at the end of the connection.
+  Report invalid streams, unexpected dictionaries, and bytes after the zlib stream ends.

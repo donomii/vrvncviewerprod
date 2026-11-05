@@ -1,5 +1,6 @@
 Read a framebuffer update
   Apply each supported pixel rectangle in order, within the framebuffer and paint limits.
+  For ZRLE, reuse the connection's decoder across rectangles and close it when the stream ends.
   End at the advertised count or at LastRect, whichever comes first.
   If DesktopSize appears, retain overlapping pixels and accept only LastRect after it.
   After a resize, keep the displayed frame and request a full frame at the new size.

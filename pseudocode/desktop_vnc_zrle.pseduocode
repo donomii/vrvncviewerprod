@@ -1,0 +1,5 @@
+Decode a ZRLE rectangle
+  Validate the compressed payload length against the rectangle's dimensions.
+  Decode raw, solid, row-aligned packed palette, and both run-length tile formats.
+  Apply tiles in order using up to 64 by 64 pixels, clipped at the rectangle edges.
+  Reject invalid tile modes, palette indexes, runs, and extra or missing tile data.
