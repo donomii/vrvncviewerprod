@@ -18,6 +18,7 @@ import (
 const (
 	vncCopyRect    = 1
 	vncDesktopSize = -223
+	vncLastRect    = -224
 	vncIOTimeout   = 15 * time.Second
 	vncTextLimit   = 1 << 20
 )
@@ -55,11 +56,14 @@ func (reader *vncReader) setup(password string) error {
 	} else if err := reader.readServerInit(); err != nil {
 		return err
 	} else {
-		// Request little-endian 32-bit BGRX, then CopyRect, Hextile, Raw and DesktopSize.
+		// Request little-endian 32-bit BGRX and the supported rectangle encodings.
+		encodings := [...]int32{vncCopyRect, vncHextile, 0, vncDesktopSize, vncLastRect}
 		settings := []byte{0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0,
-			2, 0, 0, 4, 0, 0, 0, vncCopyRect, 0, 0, 0, vncHextile, 0, 0, 0, 0}
-		resizeEncoding := int32(vncDesktopSize)
-		_, err := reader.conn.Write(binary.BigEndian.AppendUint32(settings, uint32(resizeEncoding)))
+			2, 0, 0, byte(len(encodings))}
+		for _, encoding := range encodings {
+			settings = binary.BigEndian.AppendUint32(settings, uint32(encoding))
+		}
+		_, err := reader.conn.Write(settings)
 		return err
 	}
 }
@@ -181,12 +185,21 @@ func (reader *vncReader) readUpdate() (bool, error) {
 func (reader *vncReader) readRectangles(count int) (bool, error) {
 	remainingPixels := maxFrameSide * maxFrameSide
 	remainingPaint := hextilePaintLimit
+	resized := false
 	for index := 0; index < count; index++ {
 		var header [12]byte
 		if _, err := io.ReadFull(reader.input, header[:]); err != nil {
 			return false, err
-		} else if encoding := int32(binary.BigEndian.Uint32(header[8:])); encoding == vncDesktopSize && index == count-1 {
-			return true, reader.resize(int(binary.BigEndian.Uint16(header[4:6])), int(binary.BigEndian.Uint16(header[6:8])))
+		} else if encoding := int32(binary.BigEndian.Uint32(header[8:])); encoding == vncLastRect {
+			return resized, nil
+		} else if resized {
+			return false, fmt.Errorf("VNC DesktopSize can only be followed by LastRect in an update")
+		} else if encoding == vncDesktopSize {
+			if err := reader.resize(int(binary.BigEndian.Uint16(header[4:6])), int(binary.BigEndian.Uint16(header[6:8]))); err != nil {
+				return false, err
+			} else {
+				resized = true
+			}
 		} else {
 			x, y := int(binary.BigEndian.Uint16(header[0:2])), int(binary.BigEndian.Uint16(header[2:4]))
 			w, h := int(binary.BigEndian.Uint16(header[4:6])), int(binary.BigEndian.Uint16(header[6:8]))
@@ -203,7 +216,7 @@ func (reader *vncReader) readRectangles(count int) (bool, error) {
 			}
 		}
 	}
-	return false, nil
+	return resized, nil
 }
 
 func (reader *vncReader) readPixelRect(encoding int32, rect image.Rectangle, paint *int) error {
@@ -215,7 +228,7 @@ func (reader *vncReader) readPixelRect(encoding int32, rect image.Rectangle, pai
 	case vncHextile:
 		return reader.readHextileRect(rect, paint)
 	default:
-		return fmt.Errorf("unexpected VNC encoding %d, expected Raw, CopyRect, Hextile or final DesktopSize", encoding)
+		return fmt.Errorf("unexpected VNC encoding %d, expected Raw, CopyRect, Hextile, DesktopSize or LastRect", encoding)
 	}
 }
 

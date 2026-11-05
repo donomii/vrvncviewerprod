@@ -28,6 +28,7 @@ class VncStreamSession implements StreamSession, Runnable {
     private static final int ENCODING_RAW = 0;
     private static final int ENCODING_COPY_RECT = 1;
     private static final int ENCODING_HEXTILE = 5;
+    private static final int ENCODING_LAST_RECT = -224;
     private static final int ENCODING_DESKTOP_SIZE = -223;
     private static final int ENCODING_CURSOR = -239;
     private static final String DEFAULT_PASSWORD = "aaaaaaaa";
@@ -107,7 +108,7 @@ class VncStreamSession implements StreamSession, Runnable {
 
             PixelFormat desiredFormat = PixelFormat.create32();
             sendSetPixelFormat(out, desiredFormat);
-            sendSetEncodings(out, new int[]{ENCODING_COPY_RECT, ENCODING_HEXTILE, ENCODING_RAW, ENCODING_DESKTOP_SIZE});
+            sendSetEncodings(out, new int[]{ENCODING_COPY_RECT, ENCODING_HEXTILE, ENCODING_RAW, ENCODING_DESKTOP_SIZE, ENCODING_LAST_RECT});
             out.flush();
 
             int[] pixels = new int[fbWidth * fbHeight];
@@ -137,13 +138,18 @@ class VncStreamSession implements StreamSession, Runnable {
                     int remainingPixels = MAX_FRAME_SIDE * MAX_FRAME_SIDE;
                     int remainingHextilePaint = 4 * remainingPixels;
                     boolean updated = false;
+                    boolean resizedDesktop = false;
                     for (int i = 0; i < rectCount; i++) {
                         int rectX = readU16(in);
                         int rectY = readU16(in);
                         int rectW = readU16(in);
                         int rectH = readU16(in);
                         int encoding = in.readInt();
-                        if (encoding == ENCODING_RAW || encoding == ENCODING_COPY_RECT || encoding == ENCODING_HEXTILE) {
+                        if (encoding == ENCODING_LAST_RECT) {
+                            break;
+                        } else if (resizedDesktop) {
+                            throw new IOException("VNC DesktopSize can only be followed by LastRect in an update");
+                        } else if (encoding == ENCODING_RAW || encoding == ENCODING_COPY_RECT || encoding == ENCODING_HEXTILE) {
                             checkRectangle(rectX, rectY, rectW, rectH, fbWidth, fbHeight);
                             remainingPixels -= rectW * rectH;
                             if (remainingPixels < 0) {
@@ -168,9 +174,6 @@ class VncStreamSession implements StreamSession, Runnable {
                             hasFramebuffer = true;
                             updated = true;
                         } else if (encoding == ENCODING_DESKTOP_SIZE) {
-                            if (i != rectCount - 1) {
-                                throw new IOException("VNC DesktopSize must be the final rectangle in an update");
-                            }
                             checkFrameSize(rectW, rectH);
                             int[] resized = new int[rectW * rectH];
                             int sharedWidth = Math.min(fbWidth, rectW);
@@ -185,6 +188,7 @@ class VncStreamSession implements StreamSession, Runnable {
                             // Keep the previously published image until the server supplies pixels at the new size.
                             hasFramebuffer = false;
                             updated = false;
+                            resizedDesktop = true;
                         } else if (encoding == ENCODING_CURSOR) {
                             if (rectW > MAX_FRAME_SIDE || rectH > MAX_FRAME_SIDE) {
                                 throw new MetadataLimitException("VNC cursor " + rectW + "×" + rectH
