@@ -1,0 +1,10 @@
+Decode a ZRLE rectangle
+  Read and validate the declared compressed length against the rectangle size.
+  Decode only that many compressed bytes using the connection's continuous zlib stream.
+  Read up to 64 by 64 pixels per tile from left to right and top to bottom.
+  Decode raw and solid pixels, packed palettes with byte-aligned rows, and plain or palette runs.
+  Reject reserved tile modes, missing data, bad palette indexes, overlong runs, and surplus data.
+  Copy each decoded tile into the framebuffer at the rectangle's offset.
+
+Close the decoder
+  Release the connection's inflater and its compression history.

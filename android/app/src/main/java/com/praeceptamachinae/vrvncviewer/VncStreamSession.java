@@ -28,6 +28,7 @@ class VncStreamSession implements StreamSession, Runnable {
     private static final int ENCODING_RAW = 0;
     private static final int ENCODING_COPY_RECT = 1;
     private static final int ENCODING_HEXTILE = 5;
+    private static final int ENCODING_ZRLE = 16;
     private static final int ENCODING_LAST_RECT = -224;
     private static final int ENCODING_DESKTOP_SIZE = -223;
     private static final int ENCODING_CURSOR = -239;
@@ -85,7 +86,7 @@ class VncStreamSession implements StreamSession, Runnable {
         Socket socket = null;
         DataInputStream in = null;
         DataOutputStream out = null;
-        try {
+        try (ZrleDecoder zrle = new ZrleDecoder()) {
             socket = new Socket();
             socket.connect(new InetSocketAddress(endpoint.host, endpoint.port), CONNECT_TIMEOUT_MS);
             socket.setSoTimeout(READ_TIMEOUT_MS);
@@ -108,7 +109,8 @@ class VncStreamSession implements StreamSession, Runnable {
 
             PixelFormat desiredFormat = PixelFormat.create32();
             sendSetPixelFormat(out, desiredFormat);
-            sendSetEncodings(out, new int[]{ENCODING_COPY_RECT, ENCODING_HEXTILE, ENCODING_RAW, ENCODING_DESKTOP_SIZE, ENCODING_LAST_RECT});
+            sendSetEncodings(out, new int[]{ENCODING_COPY_RECT, ENCODING_ZRLE, ENCODING_HEXTILE,
+                    ENCODING_RAW, ENCODING_DESKTOP_SIZE, ENCODING_LAST_RECT});
             out.flush();
 
             int[] pixels = new int[fbWidth * fbHeight];
@@ -149,7 +151,8 @@ class VncStreamSession implements StreamSession, Runnable {
                             break;
                         } else if (resizedDesktop) {
                             throw new IOException("VNC DesktopSize can only be followed by LastRect in an update");
-                        } else if (encoding == ENCODING_RAW || encoding == ENCODING_COPY_RECT || encoding == ENCODING_HEXTILE) {
+                        } else if (encoding == ENCODING_RAW || encoding == ENCODING_COPY_RECT
+                                || encoding == ENCODING_HEXTILE || encoding == ENCODING_ZRLE) {
                             checkRectangle(rectX, rectY, rectW, rectH, fbWidth, fbHeight);
                             remainingPixels -= rectW * rectH;
                             if (remainingPixels < 0) {
@@ -160,6 +163,8 @@ class VncStreamSession implements StreamSession, Runnable {
                             } else if (encoding == ENCODING_HEXTILE) {
                                 remainingHextilePaint = readHextileRect(in, rectX, rectY, rectW, rectH,
                                         fbWidth, pixels, desiredFormat, rowBuffer, remainingHextilePaint);
+                            } else if (encoding == ENCODING_ZRLE) {
+                                zrle.readRectangle(in, rectX, rectY, rectW, rectH, fbWidth, pixels);
                             } else {
                                 if (!hasFramebuffer) {
                                     throw new IOException("VNC CopyRect needs framebuffer pixels before copying");

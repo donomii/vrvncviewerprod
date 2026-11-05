@@ -5,7 +5,8 @@ Start VNC stream
   Request the preferred pixel format, encodings and initial full frame.
 
 Handle server messages
-  Apply Raw, CopyRect, and Hextile rectangles inside the framebuffer bounds.
+  Apply Raw, CopyRect, Hextile, and ZRLE rectangles inside the framebuffer bounds.
+  Use a fresh ZRLE decoder for each connection and close it on disconnect.
   End the update at LastRect without reading a rectangle payload.
   A DesktopSize rectangle retains overlapping pixels. Allow only LastRect after it in the update and request a full frame at the new size.
   Keep the last published frame while waiting for pixels at the new size.
